@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Shop.IntegrationTests;
@@ -40,6 +41,8 @@ public sealed class SqlFixture : IAsyncLifetime
         Client = Factory.CreateClient();
         return Task.CompletedTask;
     }
+
+    public AsyncServiceScope CreateScope() => Factory.Services.CreateAsyncScope();
 
     public async Task DisposeAsync()
     {
