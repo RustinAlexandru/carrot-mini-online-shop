@@ -6,6 +6,7 @@ using Shop.Api.Common;
 using Shop.Api.Features.Auth;
 using Shop.Api.Features.Orders;
 using Shop.Api.Features.Products;
+using Shop.Api.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Shop")
@@ -21,6 +22,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // Binding failures are always 400 responses, never exceptions, in every environment.
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = false);
 builder.Services.AddShopAuthentication();
+builder.Services.AddDraftSweeper();
 var app = builder.Build();
 await DatabaseStartup.InitializeAsync(app.Services);
 app.UseExceptionHandler();

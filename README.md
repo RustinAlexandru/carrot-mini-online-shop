@@ -1,6 +1,6 @@
 # Mini Online Shop
 
-The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog, the owned-order API and an assertion-running gate are in place. The sweeper job and the full UI follow in M4–M5.
+The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog, the owned-order API and an assertion-running gate are in place. The draft-expiry job is in place; the full UI follows in M5.
 
 Install Docker with Linux containers and Compose, and a POSIX shell. Recommended Docker resources: 8 GB RAM and 15 GB free disk.
 
@@ -30,6 +30,8 @@ Orders belong to the logged-in user and all four routes need `Authorization: Bea
 | `DELETE /orders/{id}` | 204 |
 
 Clients send product ids and quantities only; prices come from the catalog. GET shows the prices and coupon amount saved with the order, and a successful PUT refreshes them from the current catalog. The discount is the coupon amount capped at the subtotal. Another user's order and a missing order both return 404; invalid input is 400 (Problem Details with field errors); an edit of an expired order or a stale concurrent write is 409 (reload and retry). Unknown JSON members such as prices or totals are rejected.
+
+A background sweeper expires abandoned Draft orders: every `DraftSweeper:Interval` (default 1 minute) it marks Drafts last updated more than `DraftSweeper:DraftTtl` (default 30 minutes) ago as `Expired`. Expired orders stay viewable and deletable but cannot be edited (409); the sweeper never deletes orders or changes stock, and every run logs one line (`Draft sweep completed: cutoff=… scanned=… expired=… conflicts=… skipped=… durationMs=…`). Configure it with `DraftSweeper__Enabled`, `DraftSweeper__Interval` and `DraftSweeper__DraftTtl` (time spans such as `00:00:05`); Compose forwards `SHOP_SWEEPER_ENABLED`, `SHOP_SWEEPER_INTERVAL` and `SHOP_SWEEPER_DRAFT_TTL`, for example `SHOP_SWEEPER_INTERVAL=00:00:05 SHOP_SWEEPER_DRAFT_TTL=00:00:15 docker compose up --build` to watch an order expire after about 20 seconds. Values outside the usable range stop the API at startup with a message naming the setting: the interval must be between 1 millisecond and about 49.7 days (the .NET timer limit) and the TTL positive and at most 100 years.
 
 Stop with `docker compose down`, which preserves the named demo volume. `docker compose down -v` deletes demo data.
 
