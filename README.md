@@ -1,6 +1,6 @@
 # Mini Online Shop
 
-The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog, the owned-order API and an assertion-running gate are in place. The draft-expiry job is in place; the full UI follows in M5.
+The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog, the owned-order API and an assertion-running gate are in place. The draft-expiry job and the browser UI are in place.
 
 Install Docker with Linux containers and Compose, and a POSIX shell. Recommended Docker resources: 8 GB RAM and 15 GB free disk.
 
@@ -19,6 +19,8 @@ curl 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirectio
 ```
 
 `/products` accepts `page`, `pageSize` (1-50), `sortBy` (`name`, `price`, `createdAt`) and `sortDirection` (`asc`, `desc`) and needs no token; only the order endpoints require one.
+
+The page at http://localhost:8080/ is built from five native Web Components (`shop-app`, `login-form`, `product-list`, `order-editor`, `order-detail`) and one store, with no build step. Browse the catalog (public, six per page), log in as the demo user, set a quantity and press **Add to order**, adjust or remove lines and optionally enter `SAVE5` or `SAVE10`, press **Place order** and the order is read back from the server (server totals, status Draft) and can be deleted with **Delete order**. The login token and the current order live in memory only: reloading the page logs you out and forgets the order. JavaScript quantity limits (1-10000) only mirror the server's rule for convenience; the API is the authority.
 
 Orders belong to the logged-in user and all four routes need `Authorization: Bearer <token>`:
 
