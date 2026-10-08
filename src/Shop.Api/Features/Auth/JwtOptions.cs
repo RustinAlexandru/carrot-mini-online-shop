@@ -25,7 +25,7 @@ public sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
         var failures = new List<string>();
         if (string.IsNullOrWhiteSpace(options.Issuer)) failures.Add("Jwt:Issuer is required.");
         if (string.IsNullOrWhiteSpace(options.Audience)) failures.Add("Jwt:Audience is required.");
-        if (Encoding.UTF8.GetByteCount(options.SigningKey) < JwtOptions.MinimumKeyBytes)
+        if (Encoding.UTF8.GetByteCount(options.SigningKey ?? "") < JwtOptions.MinimumKeyBytes)
             failures.Add($"Jwt:SigningKey (set Jwt__SigningKey) must be at least {JwtOptions.MinimumKeyBytes} UTF-8 bytes.");
         if (options.Lifetime <= TimeSpan.Zero) failures.Add("Jwt:Lifetime must be positive.");
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
