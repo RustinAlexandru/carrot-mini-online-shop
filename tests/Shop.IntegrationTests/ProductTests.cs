@@ -144,6 +144,23 @@ public sealed class ProductTests(SqlFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Parsing_failures_are_a_generic_400_problem_while_validation_failures_carry_field_errors()
+    {
+        // The README documents this distinction: unparseable values never reach validation, so there is no errors map.
+        using var unparseable = await _client.GetAsync("/products?page=abc");
+        Assert.Equal(HttpStatusCode.BadRequest, unparseable.StatusCode);
+        Assert.Equal("application/problem+json", unparseable.Content.Headers.ContentType?.MediaType);
+        using var generic = JsonDocument.Parse(await unparseable.Content.ReadAsStringAsync());
+        Assert.Equal("Bad Request", generic.RootElement.GetProperty("title").GetString());
+        Assert.False(generic.RootElement.TryGetProperty("errors", out _));
+
+        using var outOfRange = await _client.GetAsync("/products?page=0");
+        Assert.Equal("application/problem+json", outOfRange.Content.Headers.ContentType?.MediaType);
+        using var validation = JsonDocument.Parse(await outOfRange.Content.ReadAsStringAsync());
+        Assert.True(validation.RootElement.GetProperty("errors").TryGetProperty("page", out _));
+    }
+
+    [Fact]
     public async Task Validation_problem_names_each_bad_parameter()
     {
         using var response = await _client.GetAsync("/products?page=0&sortBy=sku");

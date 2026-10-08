@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Shop.Api.Common;
