@@ -20,14 +20,22 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-docker compose --profile test run --build --rm api-tests
+if docker compose --profile test run --build --rm api-tests; then
+    api_result=0
+else
+    api_result=$?
+fi
 if docker compose --profile test run --rm ui-tests >"$SHOP_TEST_RESULTS/js.tap" 2>&1; then
     js_result=0
 else
     js_result=$?
 fi
 cat "$SHOP_TEST_RESULTS/js.tap"
-[ "$js_result" -eq 0 ] || exit "$js_result"
+if [ "$api_result" -ne 0 ] || [ "$js_result" -ne 0 ]; then
+    printf 'Gate failed: backend exit=%s; JS exit=%s\n' "$api_result" "$js_result" >&2
+    [ "$api_result" -eq 0 ] || exit "$api_result"
+    exit "$js_result"
+fi
 
 count_suite() {
     report=$(grep -l "className=\"${1}\\." "$SHOP_TEST_RESULTS"/*.trx || true)

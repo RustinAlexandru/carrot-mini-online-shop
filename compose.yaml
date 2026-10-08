@@ -58,6 +58,7 @@ services:
     volumes:
       - ./src/Shop.Api/wwwroot:/workspace/src/Shop.Api/wwwroot:ro
       - ./tests/frontend:/workspace/tests/frontend:ro
+      - ./scripts:/workspace/scripts:ro
     command: [node, --test, --test-reporter=tap, tests/frontend/store.test.mjs]
 
 volumes:
