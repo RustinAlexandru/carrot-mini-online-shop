@@ -59,8 +59,8 @@ export function createStore({ api } = {}) {
     return false;
   }
 
-  function problem(result) {
-    return { title: result.error.title, detail: result.error.detail, errors: result.error.errors };
+  function problem(result, source) {
+    return { source, title: result.error.title, detail: result.error.detail, errors: result.error.errors };
   }
 
   const store = {
@@ -90,6 +90,7 @@ export function createStore({ api } = {}) {
     },
     setCoupon(code) { update({ couponCode: String(code ?? '') }); },
     dismissNotice() { update({ notice: null }); },
+    notify(kind, text) { update({ notice: { kind, text } }); },
 
     // ---- session ----
     async login(email, password) {
@@ -136,12 +137,12 @@ export function createStore({ api } = {}) {
     // ---- orders (authenticated) ----
     async createOrder() {
       if (token === null) {
-        update({ order: { ...state.order, error: { title: 'Log in to place an order.', detail: '', errors: {} } } });
+        update({ order: { ...state.order, error: { source: 'create', title: 'Log in to place an order.', detail: '', errors: {} } } });
         return;
       }
       if (state.order.status === 'saving' || state.order.status === 'deleting') return; // one submit in flight
       if (selectedItems.size === 0) {
-        update({ order: { ...state.order, error: { title: 'Add at least one product first.', detail: '', errors: {} } } });
+        update({ order: { ...state.order, error: { source: 'create', title: 'Add at least one product first.', detail: '', errors: {} } } });
         return;
       }
 
@@ -152,7 +153,7 @@ export function createStore({ api } = {}) {
       const created = await api.createOrder(token, body);
       if (superseded(startedIn, created)) return;
       if (!created.ok) {
-        update({ order: { status: state.order.data ? 'loaded' : 'idle', data: state.order.data, error: problem(created) } });
+        update({ order: { status: state.order.data ? 'loaded' : 'idle', data: state.order.data, error: problem(created, 'create') } });
         return;
       }
 
@@ -161,7 +162,7 @@ export function createStore({ api } = {}) {
       if (!loaded.ok) {
         selectedItems.clear();
         update({
-          order: { status: 'idle', data: null, error: { title: `Order ${created.data.id} was created but could not be loaded.`, detail: loaded.error.detail, errors: {} } }
+          order: { status: 'idle', data: null, error: { source: 'create', title: `Order ${created.data.id} was created but could not be loaded.`, detail: loaded.error.detail, errors: {} } }
         });
         return;
       }
@@ -178,7 +179,7 @@ export function createStore({ api } = {}) {
       const result = await api.deleteOrder(token, current.id);
       if (superseded(startedIn, result)) return;
       if (!result.ok && result.status !== 404) {
-        update({ order: { status: 'loaded', data: current, error: problem(result) } });
+        update({ order: { status: 'loaded', data: current, error: problem(result, 'delete') } });
         return;
       }
       const text = result.ok ? 'Order deleted.' : 'The order was already gone.';
