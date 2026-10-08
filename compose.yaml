@@ -1,0 +1,64 @@
+x-sql: &sql
+  image: mcr.microsoft.com/mssql/server:2022-CU23-ubuntu-22.04
+  platform: linux/amd64
+  healthcheck:
+    test: ["CMD-SHELL", 'SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -d master -C -b -l 5 -Q "SELECT 1" >/dev/null']
+    start_period: 60s
+    interval: 10s
+    timeout: 10s
+    retries: 18
+
+services:
+  db:
+    <<: *sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_COLLATION: SQL_Latin1_General_CP1_CI_AS
+      MSSQL_SA_PASSWORD: ${SHOP_DB_SA_PASSWORD:-ShopLocal2026!Db}
+    volumes:
+      - shop-data:/var/opt/mssql
+  api:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      ConnectionStrings__Shop: "Server=db,1433;Database=Shop;User ID=sa;Password=${SHOP_DB_SA_PASSWORD:-ShopLocal2026!Db};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=False"
+      Jwt__SigningKey: ${SHOP_JWT_SIGNING_KEY:-MiniShop-Local-Demo-Signing-Key-2026!}
+    depends_on:
+      db:
+        condition: service_healthy
+  test-db:
+    <<: *sql
+    profiles: [test]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_COLLATION: SQL_Latin1_General_CP1_CI_AS
+      MSSQL_SA_PASSWORD: ${SHOP_TEST_DB_SA_PASSWORD:-ShopTests2026!Db}
+  api-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: tests
+    environment:
+      ASPNETCORE_ENVIRONMENT: Testing
+      SHOP_TEST_CONNECTION: "Server=test-db,1433;Database=ShopTests;User ID=sa;Password=${SHOP_TEST_DB_SA_PASSWORD:-ShopTests2026!Db};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=False;Pooling=False"
+    volumes:
+      - ${SHOP_TEST_RESULTS:-./TestResults}:/results
+    depends_on:
+      test-db:
+        condition: service_healthy
+  ui-tests:
+    profiles: [test]
+    image: node:24.21.0-alpine
+    working_dir: /workspace
+    volumes:
+      - ./src/Shop.Api/wwwroot:/workspace/src/Shop.Api/wwwroot:ro
+      - ./tests/frontend:/workspace/tests/frontend:ro
+    command: [node, --test, --test-reporter=tap, tests/frontend/store.test.mjs]
+
+volumes:
+  shop-data:
