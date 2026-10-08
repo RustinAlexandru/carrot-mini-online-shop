@@ -652,6 +652,118 @@ test('component: while an order is saving the catalog cannot change the draft', 
   assert.deepEqual([addButtons().some((b) => b.disabled), store.getState().order.status], [false, 'loaded']);
 });
 
+const submitEvent = () => new Event('submit', { bubbles: true, composed: true });
+const addFirstProduct = (app, quantity = '2') => {
+  const list = app.querySelector('product-list');
+  list.querySelectorAll('input')[0].value = quantity;
+  list.querySelectorAll('button').find((b) => b.hasAttribute('data-add')).click();
+};
+const orderRoutes = { 'POST /orders': reply(201, ORDER), 'GET /orders/order-1': reply(200, ORDER), 'DELETE /orders/order-1': reply(204) };
+
+test('component: an emitted order-submit reaches the real store, which posts the draft and shows the stored order', async () => {
+  const { app, store, fetchImpl } = await mountApp(orderRoutes);
+  await logIn(app);
+  addFirstProduct(app, '2');
+  const coupon = app.querySelector('order-editor').querySelector('input[id="coupon-code"]');
+  coupon.value = 'save5';
+  coupon.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+
+  app.querySelector('order-editor').querySelector('form').dispatchEvent(submitEvent());
+  await settle();
+
+  const post = fetchImpl.calls.find((c) => c.method === 'POST' && c.url === '/orders');
+  assert.deepEqual(post.body, { items: [{ productId: 'coffee-0', quantity: 2 }], couponCode: 'save5' });
+  assert.equal(post.headers.Authorization, 'Bearer tok-A');
+  assert.equal(store.getState().order.data.id, 'order-1');
+  const detail = app.querySelector('order-detail');
+  assert.match(detail.textContent, /Order order-1/);
+  assert.equal(app.querySelector('order-editor').querySelectorAll('li').length, 0);
+});
+
+test('component: order-detail shows the total the server sent, even when it differs from subtotal minus discount', () => {
+  const detail = document.createElement('order-detail');
+  document.body.append(detail);
+  detail.order = { ...ORDER, subtotal: 29, discount: 5, total: 99.99 }; // 29 - 5 would be 24
+  const amount = (label) => detail.querySelectorAll('tr').find((row) => row.children[0].textContent === label).children[1].textContent;
+  assert.deepEqual([amount('Subtotal'), amount('Discount'), amount('Total')], ['$29.00', '$5.00', '$99.99']);
+  assert.equal(detail.textContent.includes('$24.00'), false);
+  detail.remove();
+});
+
+test('component: every leaf event bubbles and is composed, and the coordinator turns each into a store call', async () => {
+  const { app, fetchImpl } = await mountApp(orderRoutes);
+  const seen = [];
+  for (const name of ['login-submit', 'page-change', 'product-select', 'line-quantity', 'line-remove', 'coupon-change', 'order-submit', 'order-delete']) {
+    document.body.addEventListener(name, (event) => seen.push({ name, bubbles: event.bubbles, composed: event.composed, from: event.target.localName }));
+  }
+
+  await logIn(app);
+  buttonByText(app, 'Next').click();
+  addFirstProduct(app, '2');
+  const editor = app.querySelector('order-editor');
+  const lineInput = editor.querySelectorAll('input').find((i) => i.hasAttribute('data-line'));
+  lineInput.value = '3';
+  lineInput.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  const coupon = editor.querySelector('input[id="coupon-code"]');
+  coupon.value = 'SAVE5';
+  coupon.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  editor.querySelectorAll('button').find((b) => b.hasAttribute('data-remove')).click();
+  addFirstProduct(app, '1');
+  editor.querySelector('form').dispatchEvent(submitEvent());
+  await settle();
+  buttonByText(app.querySelector('order-detail'), 'Delete order').click();
+  await settle();
+
+  const expected = {
+    'login-submit': 'login-form', 'page-change': 'product-list', 'product-select': 'product-list', 'line-quantity': 'order-editor',
+    'line-remove': 'order-editor', 'coupon-change': 'order-editor', 'order-submit': 'order-editor', 'order-delete': 'order-detail'
+  };
+  for (const [name, from] of Object.entries(expected)) {
+    const events = seen.filter((e) => e.name === name);
+    assert.ok(events.length > 0, `${name} was never emitted`);
+    assert.ok(events.every((e) => e.bubbles && e.composed && e.from === from), `${name} must bubble, be composed and come from ${from}`);
+  }
+  assert.ok(fetchImpl.calls.some((c) => c.method === 'POST' && c.url === '/orders' && c.body.items[0].quantity === 1));
+  assert.ok(fetchImpl.calls.some((c) => c.method === 'DELETE' && c.url === '/orders/order-1'));
+});
+
+test('component: disconnecting tears down the store subscription and every listener, and reconnecting does not double them', async () => {
+  const { app, store, fetchImpl } = await mountApp(orderRoutes);
+  let subscriptions = 0;
+  const realSubscribe = store.subscribe;
+  store.subscribe = (listener) => { subscriptions++; const off = realSubscribe(listener); return () => { subscriptions--; off(); }; };
+  app.remove();
+  document.body.append(app);
+  assert.equal(subscriptions, 1);
+
+  const login = app.querySelector('login-form').querySelector('form');
+  const list = app.querySelector('product-list');
+  const editor = app.querySelector('order-editor');
+  const form = editor.querySelector('form');
+  const coupon = editor.querySelector('input[id="coupon-code"]');
+  const detail = app.querySelector('order-detail');
+  const counts = () => ({
+    app: ['login-submit', 'page-change', 'product-select', 'line-quantity', 'line-remove', 'coupon-change', 'order-submit', 'order-delete', 'click'].map((n) => app.listenerCount(n)),
+    login: login.listenerCount('submit'),
+    list: [list.listenerCount('click'), list.listenerCount('input')],
+    editor: [form.listenerCount('submit'), form.listenerCount('click'), form.listenerCount('change'), coupon.listenerCount('input')],
+    detail: detail.listenerCount('click')
+  });
+  assert.deepEqual(counts(), { app: [1, 1, 1, 1, 1, 1, 1, 1, 1], login: 1, list: [1, 1], editor: [1, 1, 1, 1], detail: 1 }); // once, not twice
+
+  app.remove();
+  assert.equal(subscriptions, 0);
+  assert.deepEqual(counts(), { app: [0, 0, 0, 0, 0, 0, 0, 0, 0], login: 0, list: [0, 0], editor: [0, 0, 0, 0], detail: 0 });
+
+  // a detached app neither reacts to events nor re-renders on store changes
+  const before = fetchImpl.calls.length;
+  form.dispatchEvent(submitEvent());
+  store.select('coffee-0', 1);
+  await settle();
+  assert.equal(fetchImpl.calls.length, before);
+  assert.equal(editor.querySelectorAll('li').length, 0);
+});
+
 // Exercise the real gate's orchestration in an isolated directory with a fake Docker CLI.
 // This keeps nested checks independent of the outer gate's lock and SQL service.
 for (const failingSuite of ['backend', 'js']) {
