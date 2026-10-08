@@ -58,6 +58,23 @@ curl -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json
 curl 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirection=desc'
 ```
 
+### Postman
+
+[`requests/shop.postman_collection.json`](requests/shop.postman_collection.json) is a Postman collection (format v2.1) for browsing the API. In Postman choose **Import**, select the file, and you get a **Mini Online Shop** collection with four folders:
+
+- **Auth:** log in
+- **Products:** list, paged and sorted
+- **Orders:** create with `SAVE5`, get, replace with the coupon removed, delete, then get again (404)
+- **Failure examples:** a 400 with a field error, a 401 without a token, a generic 400 for an unparseable query, and a 400 for a PUT that leaves out `couponCode`
+
+Run **Auth › Log in** first. It stores the token in the `token` collection variable, and every order request inherits it as a Bearer token. Products and Log in need no token. **Products** stores two product ids, and **Create order** stores `orderId`, so the order requests chain without copying values. Tokens last 60 minutes, so run Log in again after that. `baseUrl` (default `http://localhost:8080`), `email` and `password` are collection variables.
+
+Every request has tests, so **Run collection** walks the whole flow and reports pass or fail. The flow creates and deletes its own order and never changes stock, so you can run it repeatedly. The same run works from a terminal with [newman](https://github.com/postmanlabs/newman):
+
+```sh
+npx --yes newman@6 run requests/shop.postman_collection.json
+```
+
 ## API summary
 
 | Route | Auth | Purpose |
@@ -132,7 +149,7 @@ src/Shop.Api/
   wwwroot/    index.html, styles.css, js/api.js (transport), js/store.js (state + async flows),
               js/components/ (shop-app, login-form, product-list, order-editor, order-detail).
 tests/        Shop.UnitTests, Shop.IntegrationTests, frontend/store.test.mjs, Shared/ (helpers linked into both .NET projects)
-requests/     shop.http
+requests/     shop.http (VS Code REST Client), shop.postman_collection.json (Postman / newman)
 ```
 
 How the pieces fit:
