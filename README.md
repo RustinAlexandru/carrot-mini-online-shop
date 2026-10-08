@@ -1,6 +1,6 @@
 # Mini Online Shop
 
-The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog and an assertion-running gate are in place. Orders and the full UI follow in M3–M5.
+The .NET 10 API, SQL Server 2022, an EF migration with an idempotent seed, JWT login, the paged/sorted catalog, the owned-order API and an assertion-running gate are in place. The sweeper job and the full UI follow in M4–M5.
 
 Install Docker with Linux containers and Compose, and a POSIX shell. Recommended Docker resources: 8 GB RAM and 15 GB free disk.
 
@@ -11,7 +11,7 @@ docker compose up --build
 Open http://localhost:8080/; `/health` checks connectivity to the app database. Startup applies the migration and inserts any missing seed data (user `demo@shop.test` / `DemoShop123!`, 12 products, coupons SAVE5 and SAVE10).
 
 ```sh
-# Log in as the seeded user; the bearer token is what the order endpoints (M3) require.
+# Log in as the seeded user; the bearer token is what the order endpoints require.
 curl -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"demo@shop.test","password":"DemoShop123!"}'
 # The catalog is public.
@@ -19,6 +19,17 @@ curl 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirectio
 ```
 
 `/products` accepts `page`, `pageSize` (1-50), `sortBy` (`name`, `price`, `createdAt`) and `sortDirection` (`asc`, `desc`) and needs no token; only the order endpoints require one.
+
+Orders belong to the logged-in user and all four routes need `Authorization: Bearer <token>`:
+
+| Request | Result |
+| --- | --- |
+| `POST /orders` `{"items":[{"productId":"<guid>","quantity":2}],"couponCode":"SAVE5"}` | 201 + `Location`; `couponCode` may be omitted |
+| `GET /orders/{id}` | 200 with items, coupon snapshot, `subtotal`, `discount`, `total`, `currency` (USD) |
+| `PUT /orders/{id}` `{"items":[...],"couponCode":null}` | 200; replaces the whole order (adds, changes, removes lines); `couponCode` is required, `null` removes the coupon |
+| `DELETE /orders/{id}` | 204 |
+
+Clients send product ids and quantities only; prices come from the catalog. GET shows the prices and coupon amount saved with the order, and a successful PUT refreshes them from the current catalog. The discount is the coupon amount capped at the subtotal. Another user's order and a missing order both return 404; invalid input is 400 (Problem Details with field errors); an edit of an expired order or a stale concurrent write is 409 (reload and retry). Unknown JSON members such as prices or totals are rejected.
 
 Stop with `docker compose down`, which preserves the named demo volume. `docker compose down -v` deletes demo data.
 
