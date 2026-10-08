@@ -1,5 +1,5 @@
-# Mini Online Shop: a slim request flow for the VS Code "REST Client" extension
-# (JetBrains HTTP Client reads the same file). Start the stack first: docker compose up --build
+# Mini Online Shop: a slim request flow for the VS Code "REST Client" extension (humao.rest-client).
+# Start the stack first: docker compose up --build
 # Run the requests top to bottom; later ones reuse values from earlier responses.
 
 @baseUrl = http://localhost:8080

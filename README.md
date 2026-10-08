@@ -50,7 +50,7 @@ Open <http://localhost:8080/>:
 
 Reloading the page logs you out and forgets the current order (see [NOTES](#notes)).
 
-The same API can be driven without the UI: [`requests/shop.http`](requests/shop.http) is a short flow (login, products, create with `SAVE5`, get, replace, delete, get again, one failure) for the VS Code REST Client or the JetBrains HTTP client. Plain `curl` works too:
+The same API can be driven without the UI: [`requests/shop.http`](requests/shop.http) is a short flow (login, products, create with `SAVE5`, get, replace, delete, get again, one failure) written for the VS Code **REST Client** extension (its chained `{{login.response.body.$.token}}` references are that extension's syntax; other HTTP clients need their own response handlers). Plain `curl` works too:
 
 ```sh
 curl -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
