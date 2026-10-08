@@ -18,7 +18,7 @@ Run only one gate at a time. If a crash leaves `.test-gate.lock/`, first verify 
 
 The gate exercises the test image and TestServer; it does not build or start the published runtime image. Runtime delivery was smoke-tested manually at M1 and will be certified again at M6 with `docker compose up --build`, root and health requests, and the browser flow. Automated published-runtime smoke is deferred to future CI work.
 
-With .NET SDK 10.0.401 installed, unit-only development uses `dotnet test tests/Shop.UnitTests/Shop.UnitTests.csproj`. All package versions and the EF tool are pinned.
+With .NET SDK 10.0.401 installed, unit-only development uses `dotnet test tests/Shop.UnitTests/Shop.UnitTests.csproj`. All package versions and the EF tool are pinned. NuGet audit is explicitly enabled for direct and transitive dependencies. Advisory warnings remain errors under `TreatWarningsAsErrors`: a newly disclosed vulnerability can intentionally stop restore even without a source change. Review the reported NU1901–NU1904 advisory and update the affected dependency; audit data is an external input to the gate.
 
 Compose accepts `SHOP_DB_SA_PASSWORD`, `SHOP_TEST_DB_SA_PASSWORD` and `SHOP_JWT_SIGNING_KEY` overrides. Defaults are local demo values; SA access and trusting the local SQL certificate are local development trade-offs. Changing a password variable does not rotate the password inside an existing database volume. The JWT key is supplied through the environment; JWT functionality arrives in M2. SQL Server Developer edition is for development/testing; Compose accepts its EULA.
 
