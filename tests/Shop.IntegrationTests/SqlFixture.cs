@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -70,6 +71,24 @@ public sealed class SaveFailureInjector : SaveChangesInterceptor
     }
 }
 
+/// <summary>Test-only command hook: runs one concurrent write just before the next single-order SELECT, i.e. after the sweeper chose its candidates.</summary>
+public sealed class CommandHook : DbCommandInterceptor
+{
+    private Func<Task>? _beforeNextOrderLoad;
+
+    public void BeforeNextOrderLoad(Func<Task> concurrentWrite) => Interlocked.Exchange(ref _beforeNextOrderLoad, concurrentWrite);
+    public void Disarm() => Interlocked.Exchange(ref _beforeNextOrderLoad, null);
+
+    public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+    {
+        if (command.CommandText.Contains("TOP(2)", StringComparison.Ordinal) && command.CommandText.Contains("[Orders]", StringComparison.Ordinal)
+            && Interlocked.Exchange(ref _beforeNextOrderLoad, null) is { } write)
+            await write();
+        return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
 public sealed class ShopApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
     public const string SigningKey = "Integration-Tests-Only-Signing-Key-0123456789";
@@ -81,11 +100,15 @@ public sealed class ShopApiFactory(string connectionString) : WebApplicationFact
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Shop", connectionString);
         builder.UseSetting("Jwt:SigningKey", SigningKey);
+        // The automatic sweeper stays off for every test except the dedicated hosted-tick test.
+        builder.UseSetting("DraftSweeper:Enabled", "false");
         builder.ConfigureServices(services =>
         {
             services.AddTransient<IStartupFilter, ProtectedProbeFilter>();
             services.AddSingleton<SaveFailureInjector>();
-            services.ConfigureDbContext<ShopDbContext>((provider, options) => options.AddInterceptors(provider.GetRequiredService<SaveFailureInjector>()));
+            services.AddSingleton<CommandHook>();
+            services.ConfigureDbContext<ShopDbContext>((provider, options) => options.AddInterceptors(
+                provider.GetRequiredService<SaveFailureInjector>(), provider.GetRequiredService<CommandHook>()));
         });
     }
 }
@@ -168,6 +191,8 @@ public sealed class SqlFixture : IAsyncLifetime
         await db.SaveChangesAsync();
         return user.Id;
     }
+
+    public CommandHook Commands => Factory.Services.GetRequiredService<CommandHook>();
 
     public SaveFailureInjector SaveFailures => Factory.Services.GetRequiredService<SaveFailureInjector>();
 

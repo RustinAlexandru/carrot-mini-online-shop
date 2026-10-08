@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/SqlServerErrors.cs" Link="Shared/SqlServerErrors.cs" />
+    <Compile Include="../Shared/CollectingLog.cs" Link="Shared/CollectingLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
