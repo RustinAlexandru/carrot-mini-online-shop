@@ -38,4 +38,5 @@ public readonly record struct Result<T>
     public static Result<T> Fail(AppError error) => new(default, error);
 
     public static implicit operator Result<T>(AppError error) => Fail(error);
+    public static implicit operator Result<T>(T value) => Ok(value);
 }

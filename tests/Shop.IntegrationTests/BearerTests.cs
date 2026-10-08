@@ -1,7 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace Shop.IntegrationTests;
@@ -16,23 +14,6 @@ public sealed class BearerTests(SqlFixture fixture) : IAsyncLifetime
     public Task InitializeAsync() => fixture.ResetAsync();
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private static string Token(Action<SecurityTokenDescriptor>? adjust = null, string key = ShopApiFactory.SigningKey)
-    {
-        var now = DateTime.UtcNow;
-        var descriptor = new SecurityTokenDescriptor
-        {
-            Issuer = "MiniShop",
-            Audience = "MiniShop.Web",
-            IssuedAt = now,
-            NotBefore = now,
-            Expires = now.AddMinutes(5),
-            Claims = new Dictionary<string, object> { ["sub"] = Guid.NewGuid().ToString() },
-            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)), SecurityAlgorithms.HmacSha256)
-        };
-        adjust?.Invoke(descriptor);
-        return new JsonWebTokenHandler().CreateToken(descriptor);
-    }
-
     private async Task<HttpStatusCode> StatusWith(string? token)
     {
         using var client = fixture.Factory.CreateClient();
@@ -42,7 +23,7 @@ public sealed class BearerTests(SqlFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_token_signed_with_the_configured_key_is_accepted() => Assert.Equal(HttpStatusCode.OK, await StatusWith(Token()));
+    public async Task A_token_signed_with_the_configured_key_is_accepted() => Assert.Equal(HttpStatusCode.OK, await StatusWith(TestTokens.Create()));
 
     [Fact]
     public async Task A_token_from_the_real_login_endpoint_is_accepted() => Assert.Equal(HttpStatusCode.OK, await StatusWith(await fixture.LoginAsync()));
@@ -57,18 +38,13 @@ public sealed class BearerTests(SqlFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Token_with_a_foreign_signature_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(key: "A-Different-Signing-Key-0123456789-abcdef")));
+    public async Task Token_with_a_foreign_signature_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(TestTokens.Create(key: TestTokens.ForeignKey)));
 
     [Fact]
-    public async Task Expired_token_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(d =>
-    {
-        d.IssuedAt = DateTime.UtcNow.AddMinutes(-70);
-        d.NotBefore = DateTime.UtcNow.AddMinutes(-70);
-        d.Expires = DateTime.UtcNow.AddMinutes(-10);
-    })));
+    public async Task Expired_token_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(TestTokens.Expired()));
 
     [Fact]
-    public async Task Token_without_a_usable_subject_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(d => d.Claims["sub"] = "not-a-guid")));
+    public async Task Token_without_a_usable_subject_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(TestTokens.Create(d => d.Claims["sub"] = "not-a-guid")));
 
     [Fact]
     public async Task Garbage_token_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith("not.a.jwt"));
