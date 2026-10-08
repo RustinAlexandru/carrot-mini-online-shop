@@ -1,3 +1,6 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Identity;
@@ -63,6 +66,22 @@ public sealed class SqlFixture : IAsyncLifetime
         await db.Users.ExecuteDeleteAsync();
         await SeedData.EnsureAsync(db, scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>(),
             scope.ServiceProvider.GetRequiredService<TimeProvider>());
+    }
+
+    public async Task<string> LoginAsync(string email = SeedData.DemoEmail, string password = SeedData.DemoPassword)
+    {
+        using var response = await Client.PostAsJsonAsync("/auth/login", new { email, password });
+        response.EnsureSuccessStatusCode();
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("token").GetString()!;
+    }
+
+    /// <summary>A client carrying a bearer token obtained through the real login endpoint.</summary>
+    public async Task<HttpClient> AuthenticatedClientAsync()
+    {
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync());
+        return client;
     }
 
     public AsyncServiceScope CreateScope() => Factory.Services.CreateAsyncScope();

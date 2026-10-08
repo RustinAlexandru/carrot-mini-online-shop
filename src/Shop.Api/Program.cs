@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Shop.Api.Data;
 using Shop.Api.Features.Auth;
+using Shop.Api.Features.Products;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Shop")
@@ -26,5 +27,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/health", DatabaseHealth.CheckAsync);
 app.MapAuth();
+app.MapProducts();
 await app.RunAsync();
 public partial class Program;
