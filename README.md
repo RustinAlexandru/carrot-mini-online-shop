@@ -16,6 +16,8 @@ sh scripts/test.sh
 
 Run only one gate at a time. The gate builds/runs xUnit unit and real SQL-backed integration tests, then Node assertions. It requires no host SDK, Node or SQL tools. It refuses zero executed tests, propagates failures and removes only its disposable `test-db` service. Integration uses one serialized collection/factory, fixed `test-db,1433` / `ShopTests`, distinct credentials and no volume or published SQL port. The reset guard rejects the runtime database and a non-Testing environment. The M1 shell has no entity rows; FK-ordered row reset and seed belong to M2/M3.
 
+The gate exercises the test image and TestServer; it does not build or start the published runtime image. Runtime delivery was smoke-tested manually at M1 and will be certified again at M6 with `docker compose up --build`, root and health requests, and the browser flow. Automated published-runtime smoke is deferred to future CI work.
+
 With .NET SDK 10.0.401 installed, unit-only development uses `dotnet test tests/Shop.UnitTests/Shop.UnitTests.csproj`. All package versions and the EF tool are pinned.
 
 Compose accepts `SHOP_DB_SA_PASSWORD`, `SHOP_TEST_DB_SA_PASSWORD` and `SHOP_JWT_SIGNING_KEY` overrides. Defaults are local demo values; SA access and trusting the local SQL certificate are local development trade-offs. Changing a password variable does not rotate the password inside an existing database volume. The JWT key is supplied through the environment; JWT functionality arrives in M2. SQL Server Developer edition is for development/testing; Compose accepts its EULA.
