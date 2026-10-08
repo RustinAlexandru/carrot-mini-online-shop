@@ -56,20 +56,40 @@ public sealed class ShopApiFactory(string connectionString) : WebApplicationFact
     }
 }
 
+/// <summary>What application startup alone seeded, captured before any test can call ResetAsync.</summary>
+public sealed record StartupSeedState(
+    int Users, int Products, IReadOnlyList<(string Code, decimal Amount)> Coupons, bool DemoPasswordValid);
+
 public sealed class SqlFixture : IAsyncLifetime
 {
     public string ConnectionString { get; } = Environment.GetEnvironmentVariable("SHOP_TEST_CONNECTION")
         ?? throw new InvalidOperationException("SHOP_TEST_CONNECTION is required; integration tests never skip SQL.");
     public ShopApiFactory Factory { get; private set; } = null!;
     public HttpClient Client { get; private set; } = null!;
+    public StartupSeedState StartupSeed { get; private set; } = null!;
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         TestDatabaseGuard.Validate(ConnectionString, Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "");
         Factory = new ShopApiFactory(ConnectionString);
         // One factory's normal startup owns database initialization for the entire collection.
         Client = Factory.CreateClient();
-        return Task.CompletedTask;
+        StartupSeed = await ReadStartupSeedAsync();
+    }
+
+    private async Task<StartupSeedState> ReadStartupSeedAsync()
+    {
+        await using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ShopDbContext>();
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync();
+        var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
+        var coupons = (await db.Coupons.AsNoTracking().OrderBy(c => c.Code).ToListAsync()).Select(c => (c.Code, c.Amount)).ToList();
+        return new StartupSeedState(
+            await db.Users.CountAsync(),
+            await db.Products.CountAsync(),
+            coupons,
+            user is not null && user.Email == SeedData.DemoEmail
+                && hasher.VerifyHashedPassword(user, user.PasswordHash, SeedData.DemoPassword) == PasswordVerificationResult.Success);
     }
 
     /// <summary>Deletes every row in FK order, then re-runs the seed. Migration history is preserved.</summary>

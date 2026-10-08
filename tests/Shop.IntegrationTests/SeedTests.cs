@@ -17,6 +17,15 @@ public sealed class SeedTests(SqlFixture fixture) : IAsyncLifetime
         => SeedData.EnsureAsync(db, services.GetRequiredService<IPasswordHasher<User>>(), services.GetRequiredService<TimeProvider>());
 
     [Fact]
+    public void Application_startup_alone_seeded_one_user_twelve_products_and_two_coupons()
+    {
+        // Captured by the shared fixture right after the host started, before any ResetAsync re-seeds.
+        var startup = fixture.StartupSeed;
+        Assert.Equal((1, 12, true), (startup.Users, startup.Products, startup.DemoPasswordValid));
+        Assert.Equal([("SAVE10", 10.00m), ("SAVE5", 5.00m)], startup.Coupons);
+    }
+
+    [Fact]
     public async Task Seed_creates_one_user_twelve_products_and_two_coupons()
     {
         await using var scope = fixture.CreateScope();
