@@ -23,10 +23,14 @@ public static class TestDatabaseGuard
 
 public sealed class ShopApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
+    public const string SigningKey = "Integration-Tests-Only-Signing-Key-0123456789";
+
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Shop", connectionString);
+        builder.UseSetting("Jwt:SigningKey", SigningKey);
     }
 }
 
