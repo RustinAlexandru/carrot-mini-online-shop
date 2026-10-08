@@ -49,13 +49,25 @@ public sealed class ProtectedProbeFilter : IStartupFilter
 public sealed class SaveFailureInjector : SaveChangesInterceptor
 {
     private Exception? _next;
+    private Func<Task>? _beforeNext;
 
     public void FailNextSave(Exception exception) => Interlocked.Exchange(ref _next, exception);
-    public void Disarm() => Interlocked.Exchange(ref _next, null);
+    /// <summary>Runs the callback once, inside the next save and before any SQL is sent: a deterministic stand-in for a concurrent writer.</summary>
+    public void BeforeNextSave(Func<Task> concurrentWrite) => Interlocked.Exchange(ref _beforeNext, concurrentWrite);
 
-    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+    public void Disarm()
+    {
+        Interlocked.Exchange(ref _next, null);
+        Interlocked.Exchange(ref _beforeNext, null);
+    }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
-        => Interlocked.Exchange(ref _next, null) is { } failure ? throw failure : base.SavingChangesAsync(eventData, result, cancellationToken);
+    {
+        if (Interlocked.Exchange(ref _beforeNext, null) is { } concurrentWrite) await concurrentWrite();
+        if (Interlocked.Exchange(ref _next, null) is { } failure) throw failure;
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
 }
 
 public sealed class ShopApiFactory(string connectionString) : WebApplicationFactory<Program>

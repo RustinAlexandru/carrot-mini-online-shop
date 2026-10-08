@@ -9,7 +9,7 @@ namespace Shop.Api.Features.Orders;
 /// Owned-order use cases: ownership lookup, catalog/coupon resolution, calling the aggregate, one save, response mapping.
 /// Business failures come back as <see cref="AppError"/> values, never as HTTP types.
 /// </summary>
-public sealed class OrderService(ShopDbContext db, TimeProvider time)
+public sealed class OrderService(ShopDbContext db, TimeProvider time, IServiceScopeFactory scopes)
 {
     private static readonly AppError.NotFound OrderNotFound = new("Order not found.");
 
@@ -44,8 +44,33 @@ public sealed class OrderService(ShopDbContext db, TimeProvider time)
 
         if (order.Replace(resolved.Value.Lines, resolved.Value.Coupon, time.GetUtcNow()) is { } error) return error;
 
-        await db.SaveLiveOrderAsync(order, cancellationToken);
+        var originalVersion = order.Version.ToArray();
+        try
+        {
+            await db.SaveLiveOrderAsync(order, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception is not DbUpdateConcurrencyException
+            && PersistenceExceptionHandler.IsOrderLineConstraintFailure(exception))
+        {
+            // EF may run an OrderItems INSERT before the guarded header UPDATE, so a stale writer that only adds a line fails
+            // a constraint instead of the rowversion check. Only a verified stale order becomes a conflict; anything else stays an error.
+            db.ChangeTracker.Clear();
+            if (await WasChangedOrDeletedAsync(userId, id, originalVersion, cancellationToken))
+                return new AppError.Conflict(PersistenceExceptionHandler.StaleOrderMessage);
+            throw;
+        }
+
         return OrderResponse.From(order);
+    }
+
+    /// <summary>Reads the order in a fresh context (id and subject scoped): gone, or its rowversion moved on, means our copy was stale.</summary>
+    private async Task<bool> WasChangedOrDeletedAsync(Guid userId, Guid id, byte[] originalVersion, CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var fresh = scope.ServiceProvider.GetRequiredService<ShopDbContext>();
+        var current = await fresh.Orders.AsNoTracking().Where(o => o.Id == id && o.UserId == userId)
+            .Select(o => o.Version).SingleOrDefaultAsync(cancellationToken);
+        return current is null || !current.AsSpan().SequenceEqual(originalVersion);
     }
 
     public async Task<AppError?> DeleteAsync(Guid userId, Guid id, CancellationToken cancellationToken)

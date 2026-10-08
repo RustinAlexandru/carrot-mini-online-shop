@@ -33,4 +33,23 @@ public class PersistenceConflictTests
         Assert.False(PersistenceExceptionHandler.IsConflict(new DbUpdateException("save failed", SqlServerErrors.Create(number))));
         Assert.False(PersistenceExceptionHandler.IsConflict(new InvalidOperationException("boom")));
     }
+
+    [Theory]
+    [InlineData(2601, "Cannot insert duplicate key row in object 'dbo.OrderItems' with unique index 'IX_OrderItems_OrderId_ProductId'.")]
+    [InlineData(2627, "Violation of UNIQUE KEY constraint on object 'dbo.OrderItems'.")]
+    [InlineData(547, "The INSERT statement conflicted with the FOREIGN KEY constraint \"FK_OrderItems_Orders_OrderId\".")]
+    public void Order_line_unique_and_foreign_key_failures_are_recognized_bare_or_wrapped(int number, string message)
+    {
+        Assert.True(PersistenceExceptionHandler.IsOrderLineConstraintFailure(SqlServerErrors.Create(number, message)));
+        Assert.True(PersistenceExceptionHandler.IsOrderLineConstraintFailure(new DbUpdateException("save failed", SqlServerErrors.Create(number, message))));
+        Assert.False(PersistenceExceptionHandler.IsConflict(new DbUpdateException("save failed", SqlServerErrors.Create(number, message))));
+    }
+
+    [Theory]
+    [InlineData(2601, "Cannot insert duplicate key row in object 'dbo.Products' with unique index 'IX_Products_Sku'.")]
+    [InlineData(547, "The INSERT statement conflicted with the FOREIGN KEY constraint \"FK_Orders_Users_UserId\".")]
+    [InlineData(1205, "Transaction was deadlocked on OrderItems.")]
+    [InlineData(8152, "String or binary data would be truncated in table 'dbo.OrderItems'.")]
+    public void Other_tables_and_other_error_numbers_are_not_order_line_constraint_failures(int number, string message)
+        => Assert.False(PersistenceExceptionHandler.IsOrderLineConstraintFailure(new DbUpdateException("save failed", SqlServerErrors.Create(number, message))));
 }
