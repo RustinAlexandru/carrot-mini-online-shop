@@ -36,6 +36,8 @@ test('remove and clear reset selected lines', () => {
 
 // ---- transport (the real api.js with a fake fetch) and the store flows built on it ----
 
+const settle = () => new Promise((resolve) => setImmediate(resolve)); // lets pending store promises finish; not a timer
+
 const reply = (status, body) => ({
   status,
   ok: status >= 200 && status < 300,
@@ -204,6 +206,76 @@ test('store: a second submit while one is in flight is ignored', async () => {
   gate.resolve(reply(201, ORDER));
   await first;
   assert.equal(fetchImpl.calls.filter((c) => c.method === 'POST' && c.url === '/orders').length, 1);
+});
+
+/** Everything the draft could be changed with while a submit is in flight. */
+function tryToEditDraft(store) {
+  store.select('p2', 3);
+  store.select('p1', 2);
+  store.remove('p1');
+  store.setCoupon('SAVE10');
+  store.clear();
+}
+
+test('store: the draft is frozen while the POST is in flight, so nothing accepted can be erased', async () => {
+  const post = deferred();
+  const { store, fetchImpl } = await loggedIn({ 'POST /orders': () => post.promise, 'GET /orders/order-1': reply(200, ORDER) });
+  store.select('p1', 1);
+  store.setCoupon('SAVE5');
+  const pending = store.createOrder();
+  assert.equal(store.getState().order.status, 'saving');
+
+  tryToEditDraft(store);
+
+  assert.deepEqual(store.getState().selected.map((l) => [l.productId, l.quantity]), [['p1', 1]]);
+  assert.equal(store.getState().couponCode, 'SAVE5');
+  post.resolve(reply(201, ORDER));
+  await pending;
+  const posted = fetchImpl.calls.find((c) => c.method === 'POST' && c.url === '/orders').body;
+  assert.deepEqual(posted, { items: [{ productId: 'p1', quantity: 1 }], couponCode: 'SAVE5' });
+  assert.deepEqual([store.getState().selected, store.getState().order.status], [[], 'loaded']);
+  store.select('p2', 3); // editing works again once the order is shown
+  assert.deepEqual(store.getState().selected.map((l) => l.productId), ['p2']);
+});
+
+test('store: the draft stays frozen during the follow-up GET too', async () => {
+  const detail = deferred();
+  const { store } = await loggedIn({ 'POST /orders': reply(201, ORDER), 'GET /orders/order-1': () => detail.promise });
+  store.select('p1', 1);
+  const pending = store.createOrder();
+  await settle(); // the POST has completed and the GET is now pending
+  assert.equal(store.getState().order.status, 'saving');
+
+  tryToEditDraft(store);
+
+  assert.deepEqual(store.getState().selected.map((l) => [l.productId, l.quantity]), [['p1', 1]]);
+  detail.resolve(reply(200, ORDER));
+  await pending;
+  assert.deepEqual([store.getState().selected, store.getState().order.data?.id], [[], 'order-1']);
+});
+
+test('store: when the detail GET fails only lines that were in the created order are cleared', async () => {
+  const detail = deferred();
+  const { store } = await loggedIn({ 'POST /orders': reply(201, ORDER), 'GET /orders/order-1': () => detail.promise });
+  store.select('p1', 1);
+  const pending = store.createOrder();
+  await settle();
+  store.select('p2', 3); // refused, so it can never be accepted and then lost
+  assert.deepEqual(store.getState().selected.map((l) => l.productId), ['p1']);
+  detail.resolve(reply(500, { title: 'Server error' }));
+  await pending;
+  const { order, selected } = store.getState();
+  assert.deepEqual([order.data, order.error.source, selected], [null, 'create', []]);
+  assert.match(order.error.title, /Order order-1 was created but could not be loaded/);
+  assert.equal(store.items.some((i) => i.productId === 'p2'), false);
+});
+
+test('store: a failed create unlocks the draft with the lines untouched', async () => {
+  const { store } = await loggedIn({ 'POST /orders': reply(400, { title: 'bad', errors: {} }) });
+  store.select('p1', 1);
+  await store.createOrder();
+  store.select('p2', 2);
+  assert.deepEqual(store.getState().selected.map((l) => [l.productId, l.quantity]), [['p1', 1], ['p2', 2]]);
 });
 
 test('store: a validation error keeps the selection and exposes the field errors', async () => {
@@ -389,9 +461,12 @@ class Element {
     this.childNodes = [];
     this.parentNode = null;
     this.listeners = new Map();
-    this.hidden = false;
-    this.disabled = false;
   }
+  removeAttribute(name) { this.attributes.delete(name); }
+  get hidden() { return this.hasAttribute('hidden'); }
+  set hidden(on) { if (on) this.setAttribute('hidden', ''); else this.removeAttribute('hidden'); }
+  get disabled() { return this.hasAttribute('disabled'); }
+  set disabled(on) { if (on) this.setAttribute('disabled', ''); else this.removeAttribute('disabled'); }
   get tagName() { return this.localName.toUpperCase(); }
   get isConnected() { return this === document.body || (this.parentNode?.isConnected ?? false); }
   get children() { return this.childNodes.filter((n) => n instanceof Element); }
@@ -502,7 +577,6 @@ document.body = document.createElement('body');
 await import('../../src/Shop.Api/wwwroot/js/app.js'); // registers the five real components
 const { ShopApp } = await import('../../src/Shop.Api/wwwroot/js/components/shop-app.js');
 
-const settle = () => new Promise((resolve) => setImmediate(resolve)); // lets pending store promises finish; not a timer
 const buttonByText = (root, text) => root.querySelectorAll('button').find((b) => b.textContent === text);
 
 const PRODUCTS = PAGE(1, ['coffee', 'tea']);
@@ -554,6 +628,28 @@ test('component: Log out and Dismiss clicks reach the store (empty data-* flags 
   assert.equal(store.isLoggedIn, false);
   assert.deepEqual([state.selected, state.order.data, state.loggedIn], [[], null, false]);
   assert.equal(app.querySelector('header').textContent.includes('Not logged in'), true);
+});
+
+test('component: while an order is saving the catalog cannot change the draft', async () => {
+  const post = deferred();
+  const { app, store } = await mountApp({ 'POST /orders': () => post.promise, 'GET /orders/order-1': reply(200, ORDER) });
+  await logIn(app);
+  const list = app.querySelector('product-list');
+  const addButtons = () => list.querySelectorAll('button').filter((b) => b.hasAttribute('data-add'));
+  const quantityInputs = () => list.querySelectorAll('input');
+  addButtons()[0].click();
+  assert.equal(addButtons()[0].disabled, false);
+
+  app.querySelector('order-editor').querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, composed: true }));
+  assert.equal(store.getState().order.status, 'saving');
+  assert.deepEqual([addButtons().every((b) => b.disabled), quantityInputs().every((i) => i.disabled)], [true, true]);
+  assert.equal(app.querySelector('order-editor').querySelectorAll('input').every((i) => i.disabled), true);
+  addButtons()[1].click(); // even if an event slipped through, the store refuses it
+  assert.equal(store.getState().selected.length, 1);
+
+  post.resolve(reply(201, ORDER));
+  await settle();
+  assert.deepEqual([addButtons().some((b) => b.disabled), store.getState().order.status], [false, 'loaded']);
 });
 
 // Exercise the real gate's orchestration in an isolated directory with a fake Docker CLI.

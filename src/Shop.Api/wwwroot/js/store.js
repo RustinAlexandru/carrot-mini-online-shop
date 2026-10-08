@@ -31,6 +31,10 @@ export function createStore({ api } = {}) {
     notice: null
   };
 
+  // The draft is frozen from the moment a submit starts until its order is shown: lines accepted in between
+  // would be missing from the posted snapshot yet erased when the draft is cleared.
+  const saving = () => state.order.status === 'saving';
+
   function selectedLines() {
     return [...selectedItems].map(([productId, quantity]) => {
       const product = knownProducts.get(productId);
@@ -74,6 +78,7 @@ export function createStore({ api } = {}) {
     // ---- selected lines (synchronous) ----
     get items() { return [...selectedItems].map(([productId, quantity]) => ({ productId, quantity })); },
     select(productId, quantity) {
+      if (saving()) return;
       if (!productId || !Number.isInteger(quantity) || quantity < MIN_QUANTITY || quantity > MAX_QUANTITY) {
         throw new RangeError('A product and quantity from 1 to 10000 are required.');
       }
@@ -81,14 +86,16 @@ export function createStore({ api } = {}) {
       update({});
     },
     remove(productId) {
+      if (saving()) return;
       selectedItems.delete(productId);
       update({});
     },
     clear() {
+      if (saving()) return;
       selectedItems.clear();
       update({});
     },
-    setCoupon(code) { update({ couponCode: String(code ?? '') }); },
+    setCoupon(code) { if (!saving()) update({ couponCode: String(code ?? '') }); },
     dismissNotice() { update({ notice: null }); },
     notify(kind, text) { update({ notice: { kind, text } }); },
 

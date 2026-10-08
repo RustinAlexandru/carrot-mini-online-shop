@@ -70,6 +70,7 @@ export class ShopApp extends HTMLElement {
 
     this.#products.products = state.products;
     this.#products.selected = state.selected;
+    this.#products.busy = state.order.status === 'saving';
 
     const createError = state.order.error?.source === 'create' ? state.order.error : null;
     const deleteError = state.order.error?.source === 'delete' ? state.order.error : null;

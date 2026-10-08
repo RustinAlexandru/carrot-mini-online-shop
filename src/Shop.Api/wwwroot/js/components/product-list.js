@@ -4,11 +4,13 @@ import { formatMoney } from '../format.js';
 /**
  * Shows one page of the public catalog (default ordering) and emits
  * `product-select` { productId, quantity } and `page-change` { page }.
- * Properties: `products` (page state), `selected` (lines already in the order).
+ * Properties: `products` (page state), `selected` (lines already in the order), `busy` (an order is being saved:
+ * quantities and Add/Update are disabled so the draft cannot change under the submit; paging stays available).
  */
 export class ProductList extends HTMLElement {
   #products = { status: 'idle', items: [], page: 1, totalPages: 0, error: '' };
   #selected = [];
+  #busy = false;
   #typed = new Map();
   #built = false;
   #status;
@@ -22,6 +24,8 @@ export class ProductList extends HTMLElement {
   get products() { return this.#products; }
   set selected(value) { this.#selected = value ?? []; this.#render(); }
   get selected() { return this.#selected; }
+  set busy(value) { this.#busy = Boolean(value); this.#render(); }
+  get busy() { return this.#busy; }
 
   connectedCallback() {
     if (!this.#built) this.#build();
@@ -62,12 +66,13 @@ export class ProductList extends HTMLElement {
 
   #row(product, quantityInOrder) {
     const soldOut = product.stockQuantity <= 0;
+    const locked = soldOut || this.#busy;
     const id = `qty-${product.id}`;
     const quantity = h('input', {
       id, type: 'number', min: 1, max: Math.min(10000, Math.max(1, product.stockQuantity)), step: 1,
-      value: this.#typed.get(product.id) ?? '1', 'data-product': product.id, disabled: soldOut
+      value: this.#typed.get(product.id) ?? '1', 'data-product': product.id, disabled: locked
     });
-    const add = h('button', { type: 'button', 'data-add': product.id, disabled: soldOut, text: quantityInOrder ? 'Update order line' : 'Add to order' });
+    const add = h('button', { type: 'button', 'data-add': product.id, disabled: locked, text: quantityInOrder ? 'Update order line' : 'Add to order' });
     return h('li', {},
       h('strong', { text: product.name }),
       h('span', { class: 'muted', text: ` ${product.sku} · ${product.category}` }),
