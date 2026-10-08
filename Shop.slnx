@@ -1,1 +1,5 @@
-<Solution><Project Path="src/Shop.Api/Shop.Api.csproj" /><Project Path="tests/Shop.UnitTests/Shop.UnitTests.csproj" /><Project Path="tests/Shop.IntegrationTests/Shop.IntegrationTests.csproj" /></Solution>
+<Solution>
+  <Project Path="src/Shop.Api/Shop.Api.csproj" />
+  <Project Path="tests/Shop.UnitTests/Shop.UnitTests.csproj" />
+  <Project Path="tests/Shop.IntegrationTests/Shop.IntegrationTests.csproj" />
+</Solution>
