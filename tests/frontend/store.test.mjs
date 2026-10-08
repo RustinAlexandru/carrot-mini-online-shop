@@ -374,6 +374,188 @@ test('format: server errors are described with line names and money is only form
   assert.equal(formatMoney('1234.5'), '$1,234.50');
 });
 
+// ---- a small dependency-free DOM host, so the real components run inside the Node gate ----
+// It implements only what the components use: elements with attributes/dataset/properties, tree mutation with
+// connectedCallback/disconnectedCallback, a tiny selector matcher, bubbling event dispatch and customElements.
+
+class TextNode {
+  constructor(data) { this.data = String(data); this.parentNode = null; }
+  get textContent() { return this.data; }
+}
+
+class Element {
+  constructor() {
+    this.attributes = new Map();
+    this.childNodes = [];
+    this.parentNode = null;
+    this.listeners = new Map();
+    this.hidden = false;
+    this.disabled = false;
+  }
+  get tagName() { return this.localName.toUpperCase(); }
+  get isConnected() { return this === document.body || (this.parentNode?.isConnected ?? false); }
+  get children() { return this.childNodes.filter((n) => n instanceof Element); }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); if (name === 'id') this.id = String(value); }
+  getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
+  hasAttribute(name) { return this.attributes.has(name); }
+  set className(value) { this.attributes.set('class', value); }
+  get className() { return this.attributes.get('class') ?? ''; }
+  get dataset() {
+    const data = {};
+    for (const [name, value] of this.attributes) {
+      if (name.startsWith('data-')) data[name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value;
+    }
+    return data;
+  }
+  get textContent() { return this.childNodes.map((n) => n.textContent).join(''); }
+  set textContent(value) { this.replaceChildren(String(value)); }
+  append(...nodes) { for (const node of nodes) this.#adopt(typeof node === 'string' ? new TextNode(node) : node); }
+  replaceChildren(...nodes) {
+    for (const old of [...this.childNodes]) this.#drop(old);
+    this.append(...nodes);
+  }
+  remove() { this.parentNode?.removeChild(this); }
+  removeChild(node) { this.#drop(node); }
+  #adopt(node) {
+    node.parentNode?.removeChild(node);
+    node.parentNode = this;
+    this.childNodes.push(node);
+    if (this.isConnected && node instanceof Element) node.#connect();
+  }
+  #drop(node) {
+    this.childNodes.splice(this.childNodes.indexOf(node), 1);
+    node.parentNode = null;
+    if (node instanceof Element) node.#disconnect();
+  }
+  #connect() {
+    this.connectedCallback?.();
+    for (const child of [...this.children]) child.#connect();
+  }
+  #disconnect() {
+    for (const child of [...this.children]) child.#disconnect();
+    this.disconnectedCallback?.();
+  }
+  matches(selector) {
+    const m = /^([a-z0-9-]+)?(?:\.([\w-]+))?(?:\[([\w-]+)(?:="((?:[^"\\]|\\.)*)")?\])?$/.exec(selector);
+    if (!m) throw new Error(`unsupported selector ${selector}`);
+    const [, tag, cls, attribute, value] = m;
+    if (tag && this.localName !== tag) return false;
+    if (cls && !this.className.split(' ').includes(cls)) return false;
+    if (attribute && !this.hasAttribute(attribute)) return false;
+    return value === undefined || this.getAttribute(attribute) === value.replace(/\\(.)/g, '$1');
+  }
+  closest(selector) { for (let node = this; node instanceof Element; node = node.parentNode) if (node.matches(selector)) return node; return null; }
+  querySelectorAll(selector) {
+    const found = [];
+    const walk = (node) => { for (const child of node.children) { if (child.matches(selector)) found.push(child); walk(child); } };
+    walk(this);
+    return found;
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
+  addEventListener(type, handler) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(handler);
+  }
+  removeEventListener(type, handler) { this.listeners.get(type)?.delete(handler); }
+  listenerCount(type) { return this.listeners.get(type)?.size ?? 0; }
+  /** Bubbling dispatch along the parent chain; the event keeps the flags it was created with. */
+  dispatchEvent(event) {
+    const path = [];
+    for (let node = this; node instanceof Element; node = node.parentNode) { path.push(node); if (!event.bubbles) break; }
+    let prevented = false;
+    for (const node of path) {
+      const view = { type: event.type, detail: event.detail, bubbles: event.bubbles, composed: event.composed, target: this, currentTarget: node, preventDefault() { prevented = true; } };
+      for (const handler of [...(node.listeners.get(event.type) ?? [])]) handler(view);
+    }
+    return !prevented;
+  }
+  click() { return this.dispatchEvent(new Event('click', { bubbles: true, composed: true })); }
+}
+
+class HTMLElement extends Element {}
+class HTMLInputElement extends HTMLElement {
+  #value = null;
+  get value() { return this.#value ?? this.getAttribute('value') ?? ''; }
+  set value(v) { this.#value = String(v); }
+  reportValidity() { return true; }
+}
+class HTMLButtonElement extends HTMLElement {}
+
+const registry = new Map();
+const classFor = { input: HTMLInputElement, button: HTMLButtonElement };
+globalThis.Element = Element;
+globalThis.HTMLElement = HTMLElement;
+globalThis.HTMLInputElement = HTMLInputElement;
+globalThis.CSS = { escape: (text) => String(text).replace(/["\\]/g, '\\$&') };
+globalThis.customElements = { define: (name, constructor) => registry.set(name, constructor) };
+globalThis.window = { fetch: () => { throw new Error('the DOM host never reaches the real network'); } };
+globalThis.document = {
+  createElement(tag) {
+    const element = new (registry.get(tag) ?? classFor[tag] ?? HTMLElement)();
+    element.localName = tag;
+    return element;
+  },
+  body: null
+};
+document.body = document.createElement('body');
+
+await import('../../src/Shop.Api/wwwroot/js/app.js'); // registers the five real components
+const { ShopApp } = await import('../../src/Shop.Api/wwwroot/js/components/shop-app.js');
+
+const settle = () => new Promise((resolve) => setImmediate(resolve)); // lets pending store promises finish; not a timer
+const buttonByText = (root, text) => root.querySelectorAll('button').find((b) => b.textContent === text);
+
+const PRODUCTS = PAGE(1, ['coffee', 'tea']);
+const mountRoutes = (extra = {}) => ({
+  'POST /auth/login': reply(200, { token: 'tok-A', expiresAt: '2030-01-01T00:00:00Z' }),
+  'GET /products': reply(200, PRODUCTS),
+  ...extra
+});
+
+async function mountApp(extra) {
+  const fetchImpl = fakeFetch(mountRoutes(extra));
+  const store = createStore({ api: createApi(fetchImpl) });
+  const app = document.createElement('shop-app');
+  app.store = store;
+  document.body.append(app);
+  await settle();
+  return { app, store, fetchImpl };
+}
+
+async function logIn(app) {
+  const form = app.querySelector('login-form').querySelector('form');
+  const [email, password] = form.querySelectorAll('input');
+  email.value = 'demo@shop.test';
+  password.value = 'pw';
+  form.dispatchEvent(new Event('submit', { bubbles: true, composed: true }));
+  await settle();
+}
+
+test('component: Log out and Dismiss clicks reach the store (empty data-* flags are tested by presence)', async () => {
+  const { app, store } = await mountApp({ 'POST /orders': reply(201, ORDER), 'GET /orders/order-1': reply(200, ORDER) });
+  await logIn(app);
+  assert.equal(store.isLoggedIn, true);
+  assert.equal(store.getState().notice?.text, 'Logged in.');
+
+  buttonByText(app, '×').click(); // Dismiss
+  assert.equal(store.getState().notice, null);
+  assert.equal(app.querySelectorAll('.notice')[0].children.length, 0);
+
+  // a draft and a current order exist before logging out
+  app.querySelector('product-list').querySelectorAll('button').find((b) => b.hasAttribute('data-add')).click();
+  app.querySelector('order-editor').querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, composed: true }));
+  await settle();
+  assert.equal(store.getState().order.data.id, 'order-1');
+  app.querySelector('product-list').querySelectorAll('button').find((b) => b.hasAttribute('data-add')).click();
+  assert.equal(store.getState().selected.length, 1);
+
+  buttonByText(app, 'Log out').click();
+  const state = store.getState();
+  assert.equal(store.isLoggedIn, false);
+  assert.deepEqual([state.selected, state.order.data, state.loggedIn], [[], null, false]);
+  assert.equal(app.querySelector('header').textContent.includes('Not logged in'), true);
+});
+
 // Exercise the real gate's orchestration in an isolated directory with a fake Docker CLI.
 // This keeps nested checks independent of the outer gate's lock and SQL service.
 for (const failingSuite of ['backend', 'js']) {

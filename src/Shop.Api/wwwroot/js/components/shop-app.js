@@ -97,10 +97,10 @@ export class ShopApp extends HTMLElement {
     ['order-delete', () => this.#store.deleteOrder()],
     ['click', (event) => {
       const button = event.target instanceof Element ? event.target.closest('button') : null;
-      if (button?.dataset.logout) {
+      if (button?.hasAttribute('data-logout')) {
         this.#store.logout();
         this.#store.loadProducts(this.#store.getState().products.page);
-      } else if (button?.dataset.dismiss) {
+      } else if (button?.hasAttribute('data-dismiss')) {
         this.#store.dismissNotice();
       }
     }]
