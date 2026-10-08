@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+TestResults/
+.env
+.DS_Store
+
+.test-gate.lock/
