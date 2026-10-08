@@ -18,6 +18,9 @@ public sealed class DraftSweeperHostedTests(SqlFixture fixture) : IAsyncLifetime
 {
     private static readonly DateTimeOffset Start = new(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
 
+    // Deliberately not the 1 minute / 30 minute defaults: only honouring the configured values passes this test.
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(7);
+
     public Task InitializeAsync() => fixture.ResetAsync();
     public Task DisposeAsync() => Task.CompletedTask;
 
@@ -54,8 +57,8 @@ public sealed class DraftSweeperHostedTests(SqlFixture fixture) : IAsyncLifetime
         await using var factory = fixture.Factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("DraftSweeper:Enabled", "true");
-            builder.UseSetting("DraftSweeper:Interval", "00:01:00");
-            builder.UseSetting("DraftSweeper:DraftTtl", "00:03:00");
+            builder.UseSetting("DraftSweeper:Interval", "00:00:07");
+            builder.UseSetting("DraftSweeper:DraftTtl", "00:00:21");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<TimeProvider>();
@@ -64,35 +67,35 @@ public sealed class DraftSweeperHostedTests(SqlFixture fixture) : IAsyncLifetime
             builder.ConfigureLogging(logging => logging.AddProvider(new CollectingLoggerProvider(sink)));
         });
         using var client = factory.CreateClient(); // starts the host and with it the real DraftSweeper
-        await sink.WaitForAsync(e => e.Message.StartsWith("Draft sweeper started: interval=00:01:00 draftTtl=00:03:00", StringComparison.Ordinal));
+        await sink.WaitForAsync(e => e.Message.StartsWith("Draft sweeper started: interval=00:00:07 draftTtl=00:00:21", StringComparison.Ordinal));
 
         // The PeriodicTimer exists now. Nothing runs until the fake clock reaches the configured interval.
         Assert.Empty(sink.Where(IsSummary));
 
-        // Tick 1 (+1m, cutoff -2m): the hour-old draft expires, the fresh one lives.
-        clock.Advance(TimeSpan.FromMinutes(1));
+        // Tick 1 (+7s, cutoff -14s): the hour-old draft expires, the fresh one lives.
+        clock.Advance(Interval);
         var ticks = await sink.WaitForAsync(IsSummary, 1);
         Assert.Equal((1, 1), Counts(ticks[0]));
-        Assert.Equal(Start.AddMinutes(-2), (DateTimeOffset)ticks[0].State["Cutoff"]!);
+        Assert.Equal(Start - 2 * Interval, (DateTimeOffset)ticks[0].State["Cutoff"]!);
         var swept = await Reload(old);
-        Assert.Equal((OrderStatus.Expired, Start.AddMinutes(1)), (swept.Status, swept.UpdatedAt));
+        Assert.Equal((OrderStatus.Expired, Start + Interval), (swept.Status, swept.UpdatedAt));
         Assert.Equal(OrderStatus.Draft, (await Reload(fresh)).Status);
 
-        // Tick 2 (+2m) finds nothing; tick 3 (+3m) has cutoff == the fresh order's UpdatedAt, so it is still live.
-        clock.Advance(TimeSpan.FromMinutes(1));
+        // Tick 2 (+14s) finds nothing; tick 3 (+21s) has cutoff == the fresh order's UpdatedAt, so it is still live.
+        clock.Advance(Interval);
         ticks = await sink.WaitForAsync(IsSummary, 2);
         Assert.Equal((0, 0), Counts(ticks[1]));
-        clock.Advance(TimeSpan.FromMinutes(1));
+        clock.Advance(Interval);
         ticks = await sink.WaitForAsync(IsSummary, 3);
         Assert.Equal((0, 0), Counts(ticks[2]));
         Assert.Equal(OrderStatus.Draft, (await Reload(fresh)).Status);
 
-        // Tick 4 (+4m, cutoff +1m): now older than the 3 minute TTL.
-        clock.Advance(TimeSpan.FromMinutes(1));
+        // Tick 4 (+28s, cutoff +7s): now older than the 21 second TTL.
+        clock.Advance(Interval);
         ticks = await sink.WaitForAsync(IsSummary, 4);
         Assert.Equal((1, 1), Counts(ticks[3]));
         var expired = await Reload(fresh);
-        Assert.Equal((OrderStatus.Expired, Start.AddMinutes(4)), (expired.Status, expired.UpdatedAt));
+        Assert.Equal((OrderStatus.Expired, Start + 4 * Interval), (expired.Status, expired.UpdatedAt));
         Assert.Single(expired.Items); // expiry never removes lines
         Assert.Equal(4, sink.Where(IsSummary).Count);
     }

@@ -96,8 +96,11 @@ public class DraftSweeperTests
         }
     }
 
+    // Not the 1 minute default, so the loop tests also fail if the configured interval is ignored.
+    private static readonly TimeSpan LoopInterval = TimeSpan.FromSeconds(7);
+
     private static DraftSweeper Sweeper(IServiceScopeFactory scopes, FakeTimeProvider clock, LogSink sink, bool enabled = true)
-        => new(scopes, Options.Create(new DraftSweeperOptions { Enabled = enabled, Interval = TimeSpan.FromMinutes(1) }), clock, new CollectingLogger<DraftSweeper>(sink));
+        => new(scopes, Options.Create(new DraftSweeperOptions { Enabled = enabled, Interval = LoopInterval }), clock, new CollectingLogger<DraftSweeper>(sink));
 
     [Fact]
     public async Task A_failing_tick_is_logged_with_its_exception_and_the_loop_keeps_ticking()
@@ -109,11 +112,11 @@ public class DraftSweeperTests
         await sweeper.StartAsync(CancellationToken.None);
         await sink.WaitForAsync(e => e.Message.StartsWith("Draft sweeper started"));
 
-        clock.Advance(TimeSpan.FromMinutes(1));
+        clock.Advance(LoopInterval);
         var failures = await sink.WaitForAsync(e => e.Level == LogLevel.Error, 1);
         Assert.IsType<InvalidOperationException>(failures[0].Exception);
 
-        clock.Advance(TimeSpan.FromMinutes(1));
+        clock.Advance(LoopInterval);
         await sink.WaitForAsync(e => e.Level == LogLevel.Error, 2);
         Assert.Equal(2, scopes.Calls);
         await sweeper.StopAsync(CancellationToken.None);
