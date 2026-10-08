@@ -27,6 +27,9 @@ services:
     environment:
       ConnectionStrings__Shop: "Server=db,1433;Database=Shop;User ID=sa;Password=${SHOP_DB_SA_PASSWORD:-ShopLocal2026!Db};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=False"
       Jwt__SigningKey: ${SHOP_JWT_SIGNING_KEY:-MiniShop-Local-Demo-Signing-Key-2026!}
+      DraftSweeper__Enabled: ${SHOP_SWEEPER_ENABLED:-true}
+      DraftSweeper__Interval: ${SHOP_SWEEPER_INTERVAL:-00:01:00}
+      DraftSweeper__DraftTtl: ${SHOP_SWEEPER_DRAFT_TTL:-00:30:00}
     depends_on:
       db:
         condition: service_healthy
