@@ -15,9 +15,6 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/health", async (ShopDbContext db, CancellationToken cancellationToken) =>
-    await db.Database.CanConnectAsync(cancellationToken)
-        ? Results.Ok(new { status = "healthy" })
-        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+app.MapGet("/health", DatabaseHealth.CheckAsync);
 await app.RunAsync();
 public partial class Program;

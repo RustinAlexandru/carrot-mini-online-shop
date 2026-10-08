@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Shop.Api.Data;
 using Xunit;
 
 namespace Shop.IntegrationTests;
@@ -36,6 +39,22 @@ public sealed class ShellTests(SqlFixture fixture)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("healthy", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Health_check_returns_service_unavailable_when_sql_cannot_connect()
+    {
+        // Closed local port fails promptly without changing the shared SQL fixture or its startup.
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString)
+        {
+            DataSource = "tcp:127.0.0.1,1",
+            ConnectTimeout = 1,
+            ConnectRetryCount = 0
+        };
+        var options = new DbContextOptionsBuilder<ShopDbContext>().UseSqlServer(connection.ConnectionString).Options;
+        await using var db = new ShopDbContext(options);
+        var result = await DatabaseHealth.CheckAsync(db, CancellationToken.None);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
     }
 
     [Theory]
