@@ -14,7 +14,7 @@ public sealed record ProductPage(IReadOnlyList<ProductDto> Items, int Page, int 
 public static class ProductEndpoints
 {
     public static void MapProducts(this IEndpointRouteBuilder app)
-        => app.MapGet("/products", ListAsync).RequireAuthorization();
+        => app.MapGet("/products", ListAsync).AllowAnonymous();
 
     private static async Task<IResult> ListAsync(
         ShopDbContext db, CancellationToken cancellationToken,

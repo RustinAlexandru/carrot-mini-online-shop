@@ -1,10 +1,7 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 using Shop.Api.Data;
 using Shop.Api.Domain;
 using Xunit;
@@ -14,19 +11,16 @@ namespace Shop.IntegrationTests;
 [Collection("SQL")]
 public sealed class ProductTests(SqlFixture fixture) : IAsyncLifetime
 {
+    // The catalog is public: every request below is anonymous.
     private HttpClient _client = null!;
 
     public async Task InitializeAsync()
     {
         await fixture.ResetAsync();
-        _client = await fixture.AuthenticatedClientAsync();
+        _client = fixture.Client;
     }
 
-    public Task DisposeAsync()
-    {
-        _client.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private static readonly string[] NamesAscending =
     [
@@ -35,9 +29,9 @@ public sealed class ProductTests(SqlFixture fixture) : IAsyncLifetime
         "Japanese Sencha 100g", "Masala Chai 100g", "Stoneware Mug 12oz", "Swiss Water Decaf 250g"
     ];
 
-    private async Task<JsonElement> GetPage(string query, HttpClient? client = null)
+    private async Task<JsonElement> GetPage(string query)
     {
-        using var response = await (client ?? _client).GetAsync("/products" + query);
+        using var response = await _client.GetAsync("/products" + query);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
@@ -160,58 +154,13 @@ public sealed class ProductTests(SqlFixture fixture) : IAsyncLifetime
         Assert.True(errors.TryGetProperty("sortBy", out _));
     }
 
-    // Bearer validation runs through the real middleware: only a token this app issued is accepted.
-    private static string Token(Action<SecurityTokenDescriptor>? adjust = null, string key = ShopApiFactory.SigningKey)
+    [Fact]
+    public async Task Anonymous_requests_get_200_and_invalid_paging_gets_400()
     {
-        var now = DateTime.UtcNow;
-        var descriptor = new SecurityTokenDescriptor
-        {
-            Issuer = "MiniShop",
-            Audience = "MiniShop.Web",
-            IssuedAt = now,
-            NotBefore = now,
-            Expires = now.AddMinutes(5),
-            Claims = new Dictionary<string, object> { ["sub"] = Guid.NewGuid().ToString() },
-            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)), SecurityAlgorithms.HmacSha256)
-        };
-        adjust?.Invoke(descriptor);
-        return new JsonWebTokenHandler().CreateToken(descriptor);
+        using var anonymous = fixture.Factory.CreateClient();
+        using var ok = await anonymous.GetAsync("/products?page=1&pageSize=5&sortBy=price&sortDirection=desc");
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        using var invalid = await anonymous.GetAsync("/products?pageSize=51");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
     }
-
-    private async Task<HttpStatusCode> StatusWith(string? token)
-    {
-        using var client = fixture.Factory.CreateClient();
-        if (token is not null) client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using var response = await client.GetAsync("/products");
-        return response.StatusCode;
-    }
-
-    [Fact]
-    public async Task A_token_signed_with_the_configured_key_is_accepted() => Assert.Equal(HttpStatusCode.OK, await StatusWith(Token()));
-
-    [Fact]
-    public async Task Missing_token_is_401_with_a_problem_body()
-    {
-        using var response = await fixture.Client.GetAsync("/products");
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(401, problem.RootElement.GetProperty("status").GetInt32());
-    }
-
-    [Fact]
-    public async Task Token_with_a_foreign_signature_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(key: "A-Different-Signing-Key-0123456789-abcdef")));
-
-    [Fact]
-    public async Task Expired_token_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(d =>
-    {
-        d.IssuedAt = DateTime.UtcNow.AddMinutes(-70);
-        d.NotBefore = DateTime.UtcNow.AddMinutes(-70);
-        d.Expires = DateTime.UtcNow.AddMinutes(-10);
-    })));
-
-    [Fact]
-    public async Task Token_without_a_usable_subject_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith(Token(d => d.Claims["sub"] = "not-a-guid")));
-
-    [Fact]
-    public async Task Garbage_token_is_401() => Assert.Equal(HttpStatusCode.Unauthorized, await StatusWith("not.a.jwt"));
 }

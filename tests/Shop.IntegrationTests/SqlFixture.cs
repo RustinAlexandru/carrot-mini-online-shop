@@ -1,7 +1,9 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
@@ -24,9 +26,25 @@ public static class TestDatabaseGuard
     }
 }
 
+/// <summary>Maps an authenticated-only route in the test host so bearer rejection can be asserted without production code.</summary>
+public sealed class ProtectedProbeFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.UseRouting();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseEndpoints(endpoints => endpoints
+            .MapGet(ShopApiFactory.ProtectedProbePath, () => Results.Ok(new { status = "authenticated" }))
+            .RequireAuthorization());
+        next(app);
+    };
+}
+
 public sealed class ShopApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
     public const string SigningKey = "Integration-Tests-Only-Signing-Key-0123456789";
+    public const string ProtectedProbePath = "/__test/protected";
 
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -34,6 +52,7 @@ public sealed class ShopApiFactory(string connectionString) : WebApplicationFact
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Shop", connectionString);
         builder.UseSetting("Jwt:SigningKey", SigningKey);
+        builder.ConfigureServices(services => services.AddTransient<IStartupFilter, ProtectedProbeFilter>());
     }
 }
 

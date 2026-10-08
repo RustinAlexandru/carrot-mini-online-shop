@@ -11,12 +11,16 @@ docker compose up --build
 Open http://localhost:8080/; `/health` checks connectivity to the app database. Startup applies the migration and inserts any missing seed data (user `demo@shop.test` / `DemoShop123!`, 12 products, coupons SAVE5 and SAVE10).
 
 ```sh
-TOKEN=$(curl -s -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"demo@shop.test","password":"DemoShop123!"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-curl -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirection=desc'
+# Log in as the seeded user; the bearer token is what the order endpoints (M3) require.
+curl -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"demo@shop.test","password":"DemoShop123!"}'
+# The catalog is public.
+curl 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirection=desc'
 ```
 
-`/products` accepts `page`, `pageSize` (1-50), `sortBy` (`name`, `price`, `createdAt`) and `sortDirection` (`asc`, `desc`) and requires the bearer token. Stop with `docker compose down`, which preserves the named demo volume. `docker compose down -v` deletes demo data.
+`/products` accepts `page`, `pageSize` (1-50), `sortBy` (`name`, `price`, `createdAt`) and `sortDirection` (`asc`, `desc`) and needs no token; only the order endpoints require one.
+
+Stop with `docker compose down`, which preserves the named demo volume. `docker compose down -v` deletes demo data.
 
 ```sh
 sh scripts/test.sh
