@@ -14,7 +14,7 @@ Open http://localhost:8080/; `/health` checks connectivity to the app database. 
 sh scripts/test.sh
 ```
 
-Run only one gate at a time. The gate builds/runs xUnit unit and real SQL-backed integration tests, then Node assertions. It requires no host SDK, Node or SQL tools. It refuses zero executed tests, propagates failures and removes only its disposable `test-db` service. Integration uses one serialized collection/factory, fixed `test-db,1433` / `ShopTests`, distinct credentials and no volume or published SQL port. The reset guard rejects the runtime database and a non-Testing environment. The M1 shell has no entity rows; FK-ordered row reset and seed belong to M2/M3.
+Run only one gate at a time. If a crash leaves `.test-gate.lock/`, first verify no gate is running, then use `rmdir .test-gate.lock` from the repository root and rerun. The gate builds/runs xUnit unit and real SQL-backed integration tests, then Node assertions. It requires no host SDK, Node or SQL tools. It refuses zero executed tests, propagates failures and removes only its disposable `test-db` service. Integration uses one serialized collection/factory, fixed `test-db,1433` / `ShopTests`, distinct credentials and no volume or published SQL port. The reset guard rejects the runtime database and a non-Testing environment. The M1 shell has no entity rows; FK-ordered row reset and seed belong to M2/M3.
 
 The gate exercises the test image and TestServer; it does not build or start the published runtime image. Runtime delivery was smoke-tested manually at M1 and will be certified again at M6 with `docker compose up --build`, root and health requests, and the browser flow. Automated published-runtime smoke is deferred to future CI work.
 

@@ -4,7 +4,7 @@ cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 # Fixed ShopTests storage permits one gate invocation at a time per worktree.
 lock=.test-gate.lock
 if ! mkdir "$lock" 2>/dev/null; then
-    echo 'Another gate is running; only one run at a time is supported.' >&2
+    echo 'Gate lock .test-gate.lock exists; only one run at a time is supported. If no gate is running, remove it with rmdir .test-gate.lock and rerun.' >&2
     exit 1
 fi
 SHOP_TEST_RESULTS=$(mktemp -d "${TMPDIR:-/tmp}/mini-shop-tests.XXXXXX")

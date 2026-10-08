@@ -68,3 +68,22 @@ esac
     }
   });
 }
+
+test('a stale gate lock reports its path and safe recovery', () => {
+  const root = mkdtempSync(join(tmpdir(), 'shop-gate-lock-'));
+  try {
+    mkdirSync(join(root, 'scripts'));
+    mkdirSync(join(root, '.test-gate.lock'));
+    copyFileSync(new URL('../../scripts/test.sh', import.meta.url), join(root, 'scripts/test.sh'));
+    const result = spawnSync('sh', [join(root, 'scripts/test.sh')], {
+      encoding: 'utf8', timeout: 10000
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /If no gate is running/);
+    assert.match(result.stderr, /rmdir \.test-gate\.lock/);
+    assert.equal(existsSync(join(root, '.test-gate.lock')), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
