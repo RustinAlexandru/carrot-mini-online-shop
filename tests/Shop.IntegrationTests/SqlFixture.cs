@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Shop.Api.Data;
+using Shop.Api.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -40,6 +44,21 @@ public sealed class SqlFixture : IAsyncLifetime
         // One factory's normal startup owns database initialization for the entire collection.
         Client = Factory.CreateClient();
         return Task.CompletedTask;
+    }
+
+    /// <summary>Deletes every row in FK order, then re-runs the seed. Migration history is preserved.</summary>
+    public async Task ResetAsync()
+    {
+        TestDatabaseGuard.Validate(ConnectionString, Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "");
+        await using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ShopDbContext>();
+        await db.OrderItems.ExecuteDeleteAsync();
+        await db.Orders.ExecuteDeleteAsync();
+        await db.Products.ExecuteDeleteAsync();
+        await db.Coupons.ExecuteDeleteAsync();
+        await db.Users.ExecuteDeleteAsync();
+        await SeedData.EnsureAsync(db, scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>(),
+            scope.ServiceProvider.GetRequiredService<TimeProvider>());
     }
 
     public AsyncServiceScope CreateScope() => Factory.Services.CreateAsyncScope();
