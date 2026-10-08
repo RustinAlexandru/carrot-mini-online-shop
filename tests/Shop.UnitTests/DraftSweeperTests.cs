@@ -30,18 +30,22 @@ public class DraftSweeperTests
     [InlineData("-00:01:00", "00:30:00", "DraftSweeper:Interval")]
     [InlineData("00:01:00", "00:00:00", "DraftSweeper:DraftTtl")]
     [InlineData("00:01:00", "-00:05:00", "DraftSweeper:DraftTtl")]
-    public void Non_positive_intervals_and_ttls_are_rejected(string interval, string ttl, string expected)
+    [InlineData("00:00:00.0005", "00:30:00", "DraftSweeper:Interval")] // sub-millisecond: PeriodicTimer would throw
+    [InlineData("49.17:02:47.296", "00:30:00", "DraftSweeper:Interval")] // 4294967296 ms, just above the timer maximum
+    [InlineData("60.00:00:00", "00:30:00", "DraftSweeper:Interval")]
+    [InlineData("00:01:00", "36501.00:00:00", "DraftSweeper:DraftTtl")]
+    public void Intervals_and_ttls_outside_the_usable_range_are_rejected(string interval, string ttl, string expected)
     {
         var result = Validator.Validate(null, new DraftSweeperOptions { Interval = TimeSpan.Parse(interval), DraftTtl = TimeSpan.Parse(ttl) });
         Assert.True(result.Failed);
         Assert.Contains(expected, result.FailureMessage);
     }
 
-    private static IHost CreateHost(Dictionary<string, string?> settings)
+    private static IHost CreateHost(Dictionary<string, string?> settings, LogSink? sink = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddInMemoryCollection(settings);
-        builder.Services.AddLogging();
+        builder.Services.AddLogging(logging => { if (sink is not null) logging.AddProvider(new CollectingLoggerProvider(sink)); });
         builder.Services.AddSingleton<TimeProvider>(new FakeTimeProvider(Start));
         builder.Services.AddDraftSweeper();
         return builder.Build();
@@ -50,21 +54,34 @@ public class DraftSweeperTests
     [Theory]
     [InlineData("DraftSweeper:Interval", "00:00:00", "DraftSweeper:Interval")]
     [InlineData("DraftSweeper:DraftTtl", "-00:01:00", "DraftSweeper:DraftTtl")]
-    public async Task Invalid_configuration_fails_host_start_even_when_the_sweeper_is_disabled(string key, string value, string expected)
+    [InlineData("DraftSweeper:Interval", "00:00:00.0005", "DraftSweeper:Interval")]
+    [InlineData("DraftSweeper:Interval", "60.00:00:00", "DraftSweeper:Interval")]
+    [InlineData("DraftSweeper:DraftTtl", "36501.00:00:00", "DraftSweeper:DraftTtl")]
+    public async Task Invalid_configuration_fails_host_start_whether_the_sweeper_is_enabled_or_not(string key, string value, string expected)
     {
-        using var host = CreateHost(new() { [key] = value, ["DraftSweeper:Enabled"] = "false" });
-        var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
-        Assert.Contains(expected, exception.Message);
+        foreach (var enabled in new[] { "false", "true" })
+        {
+            using var host = CreateHost(new() { [key] = value, ["DraftSweeper:Enabled"] = enabled });
+            var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+            Assert.Contains(expected, exception.Message);
+        }
     }
 
-    [Fact]
-    public async Task Configuration_binds_enabled_interval_and_ttl_from_settings()
+    [Theory]
+    [InlineData("00:00:00.001", "00:00:00.001")] // smallest interval and TTL
+    [InlineData("49.17:02:47.294", "36500.00:00:00")] // 4294967294 ms: largest interval, largest TTL
+    public async Task Boundary_values_start_an_enabled_host_and_stop_it_cleanly(string interval, string ttl)
     {
-        using var host = CreateHost(new() { ["DraftSweeper:Enabled"] = "false", ["DraftSweeper:Interval"] = "00:00:07", ["DraftSweeper:DraftTtl"] = "00:12:00" });
+        var sink = new LogSink();
+        using var host = CreateHost(new() { ["DraftSweeper:Enabled"] = "true", ["DraftSweeper:Interval"] = interval, ["DraftSweeper:DraftTtl"] = ttl }, sink);
         await host.StartAsync();
-        var options = host.Services.GetRequiredService<IOptions<DraftSweeperOptions>>().Value;
-        Assert.Equal((false, TimeSpan.FromSeconds(7), TimeSpan.FromMinutes(12)), (options.Enabled, options.Interval, options.DraftTtl));
+        // The "started" log follows the PeriodicTimer construction, so the timer accepted the interval. (Stopping earlier would
+        // cancel the background task before it ever ran, which is not what this test is about.) The fake clock never ticks.
+        await sink.WaitForAsync(e => e.Message.StartsWith("Draft sweeper started", StringComparison.Ordinal));
+        var sweeper = host.Services.GetServices<IHostedService>().OfType<DraftSweeper>().Single();
+        Assert.False(sweeper.ExecuteTask!.IsFaulted);
         await host.StopAsync();
+        Assert.True(sweeper.ExecuteTask.IsCompletedSuccessfully, $"status={sweeper.ExecuteTask.Status}");
     }
 
     // ---- the background loop (no database: the scope factory is a stand-in) ----
