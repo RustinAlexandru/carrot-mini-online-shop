@@ -1,0 +1,73 @@
+# Mini Online Shop: a slim request flow for the VS Code "REST Client" extension
+# (JetBrains HTTP Client reads the same file). Start the stack first: docker compose up --build
+# Run the requests top to bottom; later ones reuse values from earlier responses.
+
+@baseUrl = http://localhost:8080
+@email = demo@shop.test
+@password = DemoShop123!
+
+### 1. Log in as the seeded user (returns a JWT valid for 60 minutes)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### 2. Products: paged and sorted (public; no token needed). Highest price first, 5 per page.
+# @name products
+GET {{baseUrl}}/products?page=1&pageSize=5&sortBy=price&sortDirection=desc
+
+### 3. Create an order with the coupon SAVE5 (first two products of the page above)
+# @name created
+POST {{baseUrl}}/orders
+Authorization: Bearer {{login.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "items": [
+    { "productId": "{{products.response.body.$.items[0].id}}", "quantity": 2 },
+    { "productId": "{{products.response.body.$.items[1].id}}", "quantity": 1 }
+  ],
+  "couponCode": "SAVE5"
+}
+
+### 4. Read it back: server prices, snapshot coupon, subtotal / discount / total
+# @name fetched
+GET {{baseUrl}}/orders/{{created.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.token}}
+
+### 5. Replace it (whole state): new quantity, one line dropped, coupon removed with an explicit null
+# @name updated
+PUT {{baseUrl}}/orders/{{created.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "items": [
+    { "productId": "{{products.response.body.$.items[0].id}}", "quantity": 3 }
+  ],
+  "couponCode": null
+}
+
+### 6. Delete it (204 No Content)
+DELETE {{baseUrl}}/orders/{{created.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.token}}
+
+### 7. It is gone: 404 Not Found
+GET {{baseUrl}}/orders/{{created.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.token}}
+
+### 8. A failure: quantity 0 is rejected with 400 and a field error (items[0].quantity)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{login.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "items": [
+    { "productId": "{{products.response.body.$.items[0].id}}", "quantity": 0 }
+  ],
+  "couponCode": null
+}
