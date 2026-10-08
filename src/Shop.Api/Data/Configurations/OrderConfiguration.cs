@@ -11,7 +11,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         order.ToTable(t =>
         {
             t.HasCheckConstraint("CK_Orders_CouponSnapshot",
-                "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] > 0)");
+                "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] IS NOT NULL AND [CouponAmount] > 0)");
         });
         order.HasKey(o => o.Id);
         order.Property(o => o.Status).HasConversion<string>().HasMaxLength(16).IsRequired();

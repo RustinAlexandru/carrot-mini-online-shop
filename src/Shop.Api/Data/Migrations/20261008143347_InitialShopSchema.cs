@@ -77,7 +77,7 @@ namespace Shop.Api.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Orders", x => x.Id);
-                    table.CheckConstraint("CK_Orders_CouponSnapshot", "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] > 0)");
+                    table.CheckConstraint("CK_Orders_CouponSnapshot", "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] IS NOT NULL AND [CouponAmount] > 0)");
                     table.ForeignKey(
                         name: "FK_Orders_Users_UserId",
                         column: x => x.UserId,

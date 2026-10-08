@@ -12,7 +12,7 @@ using Shop.Api.Data;
 namespace Shop.Api.Data.Migrations
 {
     [DbContext(typeof(ShopDbContext))]
-    [Migration("20261008140156_InitialShopSchema")]
+    [Migration("20261008143347_InitialShopSchema")]
     partial class InitialShopSchema
     {
         /// <inheritdoc />
@@ -96,7 +96,7 @@ namespace Shop.Api.Data.Migrations
 
                     b.ToTable("Orders", t =>
                         {
-                            t.HasCheckConstraint("CK_Orders_CouponSnapshot", "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] > 0)");
+                            t.HasCheckConstraint("CK_Orders_CouponSnapshot", "([CouponCode] IS NULL AND [CouponAmount] IS NULL) OR ([CouponCode] IS NOT NULL AND [CouponAmount] IS NOT NULL AND [CouponAmount] > 0)");
                         });
                 });
 
