@@ -11,11 +11,7 @@ public abstract record AppError
 
     public sealed record Conflict(string Message) : AppError;
 
-    public sealed record Validation(IReadOnlyDictionary<string, string[]> Errors) : AppError
-    {
-        public static Validation Single(string field, string message)
-            => new(new Dictionary<string, string[]> { [field] = [message] });
-    }
+    public sealed record Validation(IReadOnlyDictionary<string, string[]> Errors) : AppError;
 }
 
 /// <summary>A value or an <see cref="AppError"/>.</summary>
