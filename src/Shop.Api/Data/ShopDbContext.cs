@@ -13,6 +13,17 @@ public sealed class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbC
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
 
+    /// <summary>
+    /// The one save path for a tracked, live order. Forcing UpdatedAt modified makes EF emit a rowversion-guarded
+    /// UPDATE of the header even when only child rows changed or the supplied timestamp equals the old one,
+    /// so every mutation is a single atomic SaveChangesAsync that a stale version aborts as a whole.
+    /// </summary>
+    public Task<int> SaveLiveOrderAsync(Order order, CancellationToken cancellationToken = default)
+    {
+        Entry(order).Property(o => o.UpdatedAt).IsModified = true;
+        return SaveChangesAsync(cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.UseCollation(Collation);

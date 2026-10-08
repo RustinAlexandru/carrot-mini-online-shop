@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Shop.Api.Data;
 using Shop.Api.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,34 @@ public sealed class ProtectedProbeFilter : IStartupFilter
     };
 }
 
+/// <summary>
+/// Test-only SaveChanges interceptor that deterministically fails the next save, so the real exception handler
+/// can be asserted over HTTP without a timing race. Disarmed by default; production code is unchanged.
+/// </summary>
+public sealed class SaveFailureInjector : SaveChangesInterceptor
+{
+    private Exception? _next;
+    private Func<Task>? _beforeNext;
+
+    public void FailNextSave(Exception exception) => Interlocked.Exchange(ref _next, exception);
+    /// <summary>Runs the callback once, inside the next save and before any SQL is sent: a deterministic stand-in for a concurrent writer.</summary>
+    public void BeforeNextSave(Func<Task> concurrentWrite) => Interlocked.Exchange(ref _beforeNext, concurrentWrite);
+
+    public void Disarm()
+    {
+        Interlocked.Exchange(ref _next, null);
+        Interlocked.Exchange(ref _beforeNext, null);
+    }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _beforeNext, null) is { } concurrentWrite) await concurrentWrite();
+        if (Interlocked.Exchange(ref _next, null) is { } failure) throw failure;
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+}
+
 public sealed class ShopApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
     public const string SigningKey = "Integration-Tests-Only-Signing-Key-0123456789";
@@ -52,7 +81,12 @@ public sealed class ShopApiFactory(string connectionString) : WebApplicationFact
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Shop", connectionString);
         builder.UseSetting("Jwt:SigningKey", SigningKey);
-        builder.ConfigureServices(services => services.AddTransient<IStartupFilter, ProtectedProbeFilter>());
+        builder.ConfigureServices(services =>
+        {
+            services.AddTransient<IStartupFilter, ProtectedProbeFilter>();
+            services.AddSingleton<SaveFailureInjector>();
+            services.ConfigureDbContext<ShopDbContext>((provider, options) => options.AddInterceptors(provider.GetRequiredService<SaveFailureInjector>()));
+        });
     }
 }
 
@@ -116,12 +150,26 @@ public sealed class SqlFixture : IAsyncLifetime
     }
 
     /// <summary>A client carrying a bearer token obtained through the real login endpoint.</summary>
-    public async Task<HttpClient> AuthenticatedClientAsync()
+    public async Task<HttpClient> AuthenticatedClientAsync(string email = SeedData.DemoEmail, string password = SeedData.DemoPassword)
     {
         var client = Factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync());
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(email, password));
         return client;
     }
+
+    /// <summary>Adds a second user (the production seed has one) so ownership can be proven; ResetAsync removes it.</summary>
+    public async Task<Guid> AddUserAsync(string email, string password)
+    {
+        await using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ShopDbContext>();
+        var user = new User { Email = email, PasswordHash = "", CreatedAt = DateTimeOffset.UtcNow };
+        user.PasswordHash = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>().HashPassword(user, password);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user.Id;
+    }
+
+    public SaveFailureInjector SaveFailures => Factory.Services.GetRequiredService<SaveFailureInjector>();
 
     public AsyncServiceScope CreateScope() => Factory.Services.CreateAsyncScope();
 
