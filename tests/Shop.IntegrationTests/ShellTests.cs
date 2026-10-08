@@ -8,6 +8,17 @@ namespace Shop.IntegrationTests;
 [Collection("SQL")]
 public sealed class ShellTests(SqlFixture fixture)
 {
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/index.html")]
+    public async Task Static_shell_is_served_as_html(string path)
+    {
+        using var response = await fixture.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("<title>Mini Online Shop</title>", await response.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Sql_connection_targets_the_isolated_application_database()
     {
