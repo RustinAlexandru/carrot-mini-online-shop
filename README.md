@@ -63,7 +63,7 @@ curl 'http://localhost:8080/products?page=1&pageSize=5&sortBy=price&sortDirectio
 | Route | Auth | Purpose |
 | --- | --- | --- |
 | `POST /auth/login` `{"email","password"}` | none | 200 `{token, expiresAt}` (JWT, 60 minutes); 401 for a wrong email or password (same answer for both); 400 for blank fields |
-| `GET /products?page&pageSize&sortBy&sortDirection` | none | 200 `{items, page, pageSize, totalCount, totalPages}`; `page` ≥ 1 (default 1), `pageSize` 1–50 (default 12), `sortBy` `name` \| `price` \| `createdAt` (default `name`), `sortDirection` `asc` \| `desc` (default `asc`); invalid values are 400 with field errors |
+| `GET /products?page&pageSize&sortBy&sortDirection` | none | 200 `{items, page, pageSize, totalCount, totalPages}`; `page` ≥ 1 (default 1), `pageSize` 1–50 (default 12), `sortBy` `name` \| `price` \| `createdAt` (default `name`), `sortDirection` `asc` \| `desc` (default `asc`); out-of-range or unlisted values are 400 with field `errors`; values that cannot be parsed (`page=abc`) are a generic 400 |
 | `POST /orders` `{"items":[{"productId","quantity"}],"couponCode"}` | bearer | 201 + `Location`; `couponCode` may be omitted |
 | `GET /orders/{id}` | bearer | 200 with items (saved SKU, name, unit price), coupon snapshot, `subtotal`, `discount`, `total`, `currency` |
 | `PUT /orders/{id}` `{"items":[...],"couponCode":null}` | bearer | 200; replaces the whole order (adds, changes, removes lines); `couponCode` **must be present**, `null` removes the coupon, a missing member is 400 |
@@ -77,7 +77,7 @@ Rules worth knowing:
 - `discount = min(coupon amount, subtotal)`, so a total is never negative. Money is exact `decimal`, USD.
 - `GET` returns the prices and coupon amount **saved with the order**; a successful `PUT` re-reads the current catalog and coupon.
 - Every order query is scoped by order id **and** the token's user. Another user's order and a missing order both answer **404**.
-- Errors are RFC 9457 Problem Details. 400 carries field `errors` (for example `items[0].quantity`), 401 is an unauthenticated or invalid token, 409 means an expired order cannot be edited or the order changed underneath you (reload and retry).
+- Errors are Problem Details (`application/problem+json`). A **400 from validation** (blank login fields, out-of-range paging or sort values, an unknown product or coupon, a quantity outside 1–10000 or above stock, empty or duplicate lines) carries an `errors` map keyed by field, for example `items[0].quantity` or `couponCode`. A **400 from request parsing** (malformed JSON, a wrong type such as `page=abc` or `"quantity":"two"`, an unknown JSON member, or a missing required member such as `couponCode` on `PUT`) is a generic `{"title":"Bad Request","status":400}` without `errors`. 401 is an unauthenticated or invalid token; 409 means an expired order cannot be edited or the order changed underneath you (reload and retry).
 
 ## Draft-expiry job
 
