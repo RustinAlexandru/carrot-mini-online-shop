@@ -161,7 +161,7 @@ How the pieces fit:
 
 ## Apple Silicon
 
-SQL Server's Linux container image is an x86-64 image, and Microsoft documents it for x86-64 hosts. On Apple Silicon, select Docker Desktop's *Apple Virtualization framework* and enable **Use Rosetta for x86_64/amd64 emulation**; Compose keeps `platform: linux/amd64`. This is a practical local workaround, **Microsoft does not test or support translated SQL Server environments, and it has not been verified by the author**: this project was only run on an Intel Mac. See Docker's [settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/) and Microsoft's [container prerequisites](https://learn.microsoft.com/en-us/sql/linux/install-upgrade/quickstart-install-docker?view=sql-server-ver16&tabs=cli).
+SQL Server's Linux container image is an x86-64 image, and Microsoft documents it for x86-64 hosts. On Apple Silicon, select Docker Desktop's *Apple Virtualization framework* and enable **Use Rosetta for x86_64/amd64 emulation**; Compose keeps `platform: linux/amd64`. This is a practical local workaround, ~~**Microsoft does not test or support translated SQL Server environments, and it has not been verified by the author**: this project was only run on an Intel Mac.~~(Confirmed it works on a Silicone Mac as well). See Docker's [settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/) and Microsoft's [container prerequisites](https://learn.microsoft.com/en-us/sql/linux/install-upgrade/quickstart-install-docker?view=sql-server-ver16&tabs=cli).
 
 ## NOTES
 
